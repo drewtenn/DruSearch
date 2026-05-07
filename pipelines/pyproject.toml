@@ -18,7 +18,7 @@ dependencies = [
   "torch==2.5.1",
   "tqdm==4.67.1",
   "tenacity==9.0.0",
-  "python-dotenv==1.0.1",
+  "python-dotenv==1.2.2",
   "httpx==0.28.1",
   "prefect==3.1.7",
 ]
