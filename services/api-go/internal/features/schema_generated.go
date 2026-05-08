@@ -3,7 +3,7 @@
 
 package features
 
-const SchemaVersion = "v3"
+const SchemaVersion = "v4"
 
 const (
 	GenBm25Score = 0
@@ -31,8 +31,10 @@ const (
 	GenProductCategoryTokenOverlap = 22
 	GenTitleExactQueryMatch = 23
 	GenUserBrandAffinity = 24
+	GenQueryAffordabilityIntent = 25
+	GenAffordabilityPriceScore = 26
 
-	GenNumFeatures = 25
+	GenNumFeatures = 27
 )
 
 // GenNames is the ordered feature-name list aligned with the indices above.
@@ -62,4 +64,6 @@ var GenNames = [...]string{
 	"product_category_token_overlap",
 	"title_exact_query_match",
 	"user_brand_affinity",
+	"query_affordability_intent",
+	"affordability_price_score",
 }

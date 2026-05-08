@@ -385,6 +385,32 @@
         "product_category_token_overlap": 0.2,
         "title_exact_query_match": 1.0
       }
+    },
+    {
+      "name": "affordable_cost_query",
+      "query": "budget friendly low cost sneakers",
+      "product_title": "Budget Friendly Sneakers",
+      "category_path": ["Clothing, Shoes & Jewelry", "Women", "Shoes", "Sneakers"],
+      "expected": {
+        "tokenize": ["budget", "friendly", "low", "cost", "sneakers"],
+        "query_length_tokens": 5.0,
+        "query_has_brand": 0.0,
+        "query_has_color": 0.0,
+        "query_has_category_token": 1.0,
+        "query_has_size_pattern": 0.0,
+        "query_affordability_intent": 1.0,
+        "query_gender_intent": 0.0,
+        "product_gender": 2.0,
+        "gender_intent_match": 0.0,
+        "gender_intent_mismatch": 0.0,
+        "product_brand_match": 0.0,
+        "product_brand_token_overlap": 0.0,
+        "product_color_match": 0.0,
+        "title_query_token_coverage": 0.6,
+        "category_query_token_coverage": 0.2,
+        "product_category_token_overlap": 0.2,
+        "title_exact_query_match": 0.0
+      }
     }
   ]
 }

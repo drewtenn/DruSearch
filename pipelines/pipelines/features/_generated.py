@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-SCHEMA_VERSION = "v3"
+SCHEMA_VERSION = "v4"
 
 @dataclass(frozen=True)
 class GeneratedFeature:
@@ -41,6 +41,8 @@ FEATURES: tuple[GeneratedFeature, ...] = (
     GeneratedFeature(index=22, name="product_category_token_overlap", kind="FLOAT", source="INTERACTION", description="Fraction of product category tokens present in query"),
     GeneratedFeature(index=23, name="title_exact_query_match", kind="BOOL", source="INTERACTION", description="Normalized full query appears in normalized title"),
     GeneratedFeature(index=24, name="user_brand_affinity", kind="FLOAT", source="ONLINE_USER", description="User brand click-share in [0,1]"),
+    GeneratedFeature(index=25, name="query_affordability_intent", kind="BOOL", source="INTERACTION", description="Query asks for affordable, cheap, budget, value, or low-cost products"),
+    GeneratedFeature(index=26, name="affordability_price_score", kind="FLOAT", source="INTERACTION", description="Low-price score active only for affordability-intent queries; larger means cheaper"),
 )
 
 FEATURE_NAMES: tuple[str, ...] = tuple(f.name for f in FEATURES)
@@ -71,3 +73,5 @@ IDX_CATEGORY_QUERY_TOKEN_COVERAGE = 21
 IDX_PRODUCT_CATEGORY_TOKEN_OVERLAP = 22
 IDX_TITLE_EXACT_QUERY_MATCH = 23
 IDX_USER_BRAND_AFFINITY = 24
+IDX_QUERY_AFFORDABILITY_INTENT = 25
+IDX_AFFORDABILITY_PRICE_SCORE = 26

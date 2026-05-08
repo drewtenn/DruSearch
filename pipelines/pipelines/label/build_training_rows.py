@@ -185,6 +185,11 @@ def main() -> int:
         lambda q: tf.query_has_category_token(q, category_token_set)
     )
     df["query_has_size_pattern"] = df["query"].apply(tf.query_has_size_pattern)
+    df["query_affordability_intent"] = df["query"].apply(tf.query_affordability_intent)
+    df["affordability_price_score"] = [
+        tf.affordability_price_score(qai, price)
+        for qai, price in zip(df["query_affordability_intent"], df["price_cents"])
+    ]
     df["query_gender_intent"]    = df["query"].apply(tf.query_gender_intent)
     df["product_gender"]         = df["category_path"].apply(tf.product_gender)
     df["gender_intent_match"] = [

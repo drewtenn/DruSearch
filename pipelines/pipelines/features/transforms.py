@@ -7,6 +7,7 @@ parity test runs both impls on the same fixtures.
 from __future__ import annotations
 
 import re
+import math
 
 # Tokenize on \w+ (Unicode word characters), lowercase. Matches Go regexp default.
 _TOKEN_RE = re.compile(r"\w+", re.UNICODE)
@@ -70,6 +71,43 @@ def query_has_category_token(query: str | None, known_category_tokens: frozenset
 
 def query_has_size_pattern(query: str | None) -> float:
     return 1.0 if (query and _SIZE_RE.search(query)) else 0.0
+
+
+_AFFORDABILITY_TOKENS = {
+    "affordable",
+    "affordability",
+    "cheap",
+    "cheaper",
+    "cheapest",
+    "budget",
+    "inexpensive",
+    "economical",
+    "value",
+    "price",
+    "priced",
+    "pricing",
+    "cost",
+    "costs",
+}
+_AFFORDABILITY_PREFIXES = {"low", "lower", "lowest"}
+_AFFORDABILITY_NOUNS = {"cost", "price"}
+
+
+def query_affordability_intent(query: str | None) -> float:
+    tokens = tokenize(query)
+    for i, token in enumerate(tokens):
+        if token in _AFFORDABILITY_TOKENS:
+            return 1.0
+        if i and tokens[i - 1] in _AFFORDABILITY_PREFIXES and token in _AFFORDABILITY_NOUNS:
+            return 1.0
+    return 0.0
+
+
+def affordability_price_score(query_affordability: float, price_cents: int | float | None) -> float:
+    price = float(price_cents or 0)
+    if not query_affordability or price <= 0:
+        return 0.0
+    return float(1 / math.log1p(price))
 
 
 def query_gender_intent(query: str | None) -> float:

@@ -44,6 +44,8 @@ func TestSchemaMatchesGenerated(t *testing.T) {
 		IdxProductCategoryTokenOverlap: "product_category_token_overlap",
 		IdxTitleExactQueryMatch:        "title_exact_query_match",
 		IdxUserBrandAffinity:           "user_brand_affinity",
+		IdxQueryAffordabilityIntent:    "query_affordability_intent",
+		IdxAffordabilityPriceScore:     "affordability_price_score",
 	}
 	for idx, name := range indexExpect {
 		if Names[idx] != name {

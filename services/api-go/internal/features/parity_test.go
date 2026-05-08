@@ -48,6 +48,7 @@ type fixtureExpects struct {
 	QueryHasColor          float64  `json:"query_has_color"`
 	QueryHasCategory       float64  `json:"query_has_category_token"`
 	QueryHasSizePattern    float64  `json:"query_has_size_pattern"`
+	QueryAffordability     float64  `json:"query_affordability_intent"`
 	QueryGenderIntent      float64  `json:"query_gender_intent"`
 	ProductGender          float64  `json:"product_gender"`
 	GenderIntentMatch      float64  `json:"gender_intent_match"`
@@ -103,6 +104,9 @@ func TestInteractionParityFixtures(t *testing.T) {
 			}
 			if v := QueryHasSizePattern(c.Query); v != c.Expected.QueryHasSizePattern {
 				t.Errorf("QueryHasSizePattern(%q) = %v, want %v", c.Query, v, c.Expected.QueryHasSizePattern)
+			}
+			if v := QueryAffordabilityIntent(c.Query); v != c.Expected.QueryAffordability {
+				t.Errorf("QueryAffordabilityIntent(%q) = %v, want %v", c.Query, v, c.Expected.QueryAffordability)
 			}
 			qg := QueryGenderIntent(c.Query)
 			if qg != c.Expected.QueryGenderIntent {

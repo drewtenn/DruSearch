@@ -25,5 +25,16 @@ Same as `query_has_brand` against the known-color set.
 ### `query_has_size_pattern` (BOOL)
 Return 1.0 if `re.search(r"\b\d+(\.\d+)?\s?(oz|ml|gb|tb|in|cm)\b", query, re.IGNORECASE)` matches, else 0.0. Both languages must compile the identical pattern.
 
+### `query_affordability_intent` (BOOL)
+Tokenize the query with the shared tokenization rules. Return 1.0 if the query contains one of:
+
+- A direct affordability token: `affordable`, `affordability`, `cheap`, `cheaper`, `cheapest`, `budget`, `inexpensive`, `economical`, `value`, `price`, `priced`, `pricing`, `cost`, `costs`.
+- A two-token affordability phrase: `low cost`, `low price`, `lower cost`, `lower price`, `lowest cost`, `lowest price`.
+
+Return 0.0 otherwise.
+
+### `affordability_price_score` (FLOAT)
+If `query_affordability_intent` is 0.0 or `price_cents <= 0`, return 0.0. Otherwise return `1 / log1p(price_cents)`, so lower priced products receive a larger value only when the query expresses affordability intent.
+
 ### `session_last_query_overlap` (FLOAT)
 Jaccard similarity between the token set of the current query and the token set of the most recent query in the session (per Redis hash `feat:session:{sid}.last_query`). Empty intersection or empty session → 0.0. Tokenization rules match `query_length_tokens`.

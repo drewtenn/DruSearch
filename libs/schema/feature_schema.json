@@ -1,5 +1,5 @@
 {
-  "version": "v3",
+  "version": "v4",
   "_comment": "Canonical LTR feature schema. Full-system rebuild required when reordered. Run `make regen-feature-schema` and `make check-feature-parity` after editing.",
   "features": [
     {"index": 0, "name": "bm25_score", "kind": "FLOAT", "source": "RETRIEVAL", "description": "BM25 raw score"},
@@ -26,6 +26,8 @@
     {"index": 21, "name": "category_query_token_coverage", "kind": "FLOAT", "source": "INTERACTION", "description": "Fraction of non-brand query tokens present in category path"},
     {"index": 22, "name": "product_category_token_overlap", "kind": "FLOAT", "source": "INTERACTION", "description": "Fraction of product category tokens present in query"},
     {"index": 23, "name": "title_exact_query_match", "kind": "BOOL", "source": "INTERACTION", "description": "Normalized full query appears in normalized title"},
-    {"index": 24, "name": "user_brand_affinity", "kind": "FLOAT", "source": "ONLINE_USER", "description": "User brand click-share in [0,1]"}
+    {"index": 24, "name": "user_brand_affinity", "kind": "FLOAT", "source": "ONLINE_USER", "description": "User brand click-share in [0,1]"},
+    {"index": 25, "name": "query_affordability_intent", "kind": "BOOL", "source": "INTERACTION", "description": "Query asks for affordable, cheap, budget, value, or low-cost products"},
+    {"index": 26, "name": "affordability_price_score", "kind": "FLOAT", "source": "INTERACTION", "description": "Low-price score active only for affordability-intent queries; larger means cheaper"}
   ]
 }

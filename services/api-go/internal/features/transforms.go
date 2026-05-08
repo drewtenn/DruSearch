@@ -1,6 +1,7 @@
 package features
 
 import (
+	"math"
 	"regexp"
 	"strings"
 	"unicode"
@@ -67,6 +68,30 @@ func QueryHasSizePattern(query string) float64 {
 	return 0
 }
 
+func QueryAffordabilityIntent(query string) float64 {
+	tokens := Tokenize(query)
+	for i, t := range tokens {
+		if affordabilityToken(t) {
+			return 1
+		}
+		if i == 0 {
+			continue
+		}
+		prev := tokens[i-1]
+		if (prev == "low" || prev == "lower" || prev == "lowest") && (t == "cost" || t == "price") {
+			return 1
+		}
+	}
+	return 0
+}
+
+func AffordabilityPriceScore(queryAffordability float64, priceCents int) float64 {
+	if queryAffordability == 0 || priceCents <= 0 {
+		return 0
+	}
+	return 1 / math.Log1p(float64(priceCents))
+}
+
 func QueryGenderIntent(query string) float64 {
 	found := GenderNone
 	for _, t := range Tokenize(query) {
@@ -80,6 +105,17 @@ func QueryGenderIntent(query string) float64 {
 		found = g
 	}
 	return found
+}
+
+func affordabilityToken(t string) bool {
+	switch t {
+	case "affordable", "affordability", "cheap", "cheaper", "cheapest",
+		"budget", "inexpensive", "economical", "value", "price", "priced",
+		"pricing", "cost", "costs":
+		return true
+	default:
+		return false
+	}
 }
 
 func ProductGender(categoryPath []string) float64 {

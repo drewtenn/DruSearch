@@ -21,6 +21,7 @@ from pipelines.features.transforms import (
     product_color_match,
     product_category_token_overlap,
     product_gender,
+    query_affordability_intent,
     query_token_coverage,
     query_has_brand,
     query_has_category_token,
@@ -94,6 +95,11 @@ def test_interaction_parity_fixtures():
         if got_qhs != exp["query_has_size_pattern"]:
             failures.append(f"{case['name']}: query_has_size_pattern({q!r}) = {got_qhs}, want {exp['query_has_size_pattern']}")
 
+        got_qai = query_affordability_intent(q)
+        want_qai = exp.get("query_affordability_intent", 0.0)
+        if got_qai != want_qai:
+            failures.append(f"{case['name']}: query_affordability_intent({q!r}) = {got_qai}, want {want_qai}")
+
         category_path = case.get("category_path", [])
         got_qgi = query_gender_intent(q)
         if got_qgi != exp["query_gender_intent"]:
@@ -155,4 +161,4 @@ def test_schema_matches_generated():
         f"FEATURE_NAMES drift: {FEATURE_NAMES} vs {gen.FEATURE_NAMES}"
     )
     assert NUM_FEATURES == gen.NUM_FEATURES
-    assert gen.SCHEMA_VERSION == "v3"
+    assert gen.SCHEMA_VERSION == "v4"

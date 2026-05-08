@@ -72,6 +72,7 @@ func BuildMatrix(query string, hits []retrieval.Hit, vocab *Vocab, user *UserFea
 	qColor := QueryHasAny(query, vocab.Color)
 	qCategory := QueryHasAny(query, vocab.Category)
 	qSize := QueryHasSizePattern(query)
+	qAffordability := QueryAffordabilityIntent(query)
 	qGender := QueryGenderIntent(query)
 
 	var brandAff map[string]float64
@@ -110,6 +111,8 @@ func BuildMatrix(query string, hits []retrieval.Hit, vocab *Vocab, user *UserFea
 		if brandAff != nil {
 			out[off+IdxUserBrandAffinity] = brandAff[h.Brand]
 		}
+		out[off+IdxQueryAffordabilityIntent] = qAffordability
+		out[off+IdxAffordabilityPriceScore] = AffordabilityPriceScore(qAffordability, h.PriceCents)
 	}
 	return out
 }

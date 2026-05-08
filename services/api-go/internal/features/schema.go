@@ -34,8 +34,10 @@ const (
 	IdxProductCategoryTokenOverlap = 22
 	IdxTitleExactQueryMatch        = 23
 	IdxUserBrandAffinity           = 24
+	IdxQueryAffordabilityIntent    = 25
+	IdxAffordabilityPriceScore     = 26
 
-	NumFeatures = 25
+	NumFeatures = 27
 )
 
 // Names ordered by their feature index above.
@@ -65,4 +67,6 @@ var Names = [...]string{
 	"product_category_token_overlap",
 	"title_exact_query_match",
 	"user_brand_affinity",
+	"query_affordability_intent",
+	"affordability_price_score",
 }
