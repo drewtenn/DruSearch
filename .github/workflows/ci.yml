@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "claude/**"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  feature-schema-parity:
+    name: Feature schema parity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Regenerate and check for drift
+        run: make check-feature-parity
+
+  go-tests:
+    name: Go tests (api-go)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: services/api-go/go.sum
+      - name: go vet
+        working-directory: services/api-go
+        run: go vet ./...
+      - name: go test
+        working-directory: services/api-go
+        run: go test ./... -count=1
+
+  python-tests:
+    name: Python tests (pipelines)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install pytest
+        run: pip install pytest
+      # Avoids the heavy ML deps; the parity tests only need the stdlib.
+      - name: Run interaction-feature parity tests
+        working-directory: pipelines
+        env:
+          PYTHONPATH: .
+        run: pytest tests/test_interaction_parity.py -v

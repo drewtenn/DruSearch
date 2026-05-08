@@ -1,0 +1,119 @@
+{
+  "_comment": "Cross-language parity fixtures for INTERACTION features. Both Python (pipelines/tests/test_interaction_parity.py) and Go (services/api-go/internal/features/parity_test.go) read this file, run their reference implementation, and assert byte-equal output. Add cases here, then run `make check-feature-parity`.",
+  "vocab": {
+    "brands": ["nike", "adidas", "puma", "reebok", "yeti"],
+    "colors": ["red", "blue", "black", "white", "green", "navy"]
+  },
+  "cases": [
+    {
+      "name": "empty_query",
+      "query": "",
+      "expected": {
+        "tokenize":              [],
+        "query_length_tokens":   0.0,
+        "query_has_brand":       0.0,
+        "query_has_color":       0.0,
+        "query_has_size_pattern": 0.0
+      }
+    },
+    {
+      "name": "plain_three_words",
+      "query": "running shoes mens",
+      "expected": {
+        "tokenize":              ["running", "shoes", "mens"],
+        "query_length_tokens":   3.0,
+        "query_has_brand":       0.0,
+        "query_has_color":       0.0,
+        "query_has_size_pattern": 0.0
+      }
+    },
+    {
+      "name": "uppercase_brand",
+      "query": "NIKE Air Zoom",
+      "expected": {
+        "tokenize":              ["nike", "air", "zoom"],
+        "query_length_tokens":   3.0,
+        "query_has_brand":       1.0,
+        "query_has_color":       0.0,
+        "query_has_size_pattern": 0.0
+      }
+    },
+    {
+      "name": "color_punctuation",
+      "query": "Red, white & blue flag",
+      "expected": {
+        "tokenize":              ["red", "white", "blue", "flag"],
+        "query_length_tokens":   4.0,
+        "query_has_brand":       0.0,
+        "query_has_color":       1.0,
+        "query_has_size_pattern": 0.0
+      }
+    },
+    {
+      "name": "size_oz_with_space",
+      "query": "yeti 32 oz tumbler",
+      "expected": {
+        "tokenize":              ["yeti", "32", "oz", "tumbler"],
+        "query_length_tokens":   4.0,
+        "query_has_brand":       1.0,
+        "query_has_color":       0.0,
+        "query_has_size_pattern": 1.0
+      }
+    },
+    {
+      "name": "size_gb_no_space",
+      "query": "256gb ssd",
+      "expected": {
+        "tokenize":              ["256gb", "ssd"],
+        "query_length_tokens":   2.0,
+        "query_has_brand":       0.0,
+        "query_has_color":       0.0,
+        "query_has_size_pattern": 1.0
+      }
+    },
+    {
+      "name": "size_decimal_in",
+      "query": "9.5in laptop",
+      "expected": {
+        "tokenize":              ["9", "5in", "laptop"],
+        "query_length_tokens":   3.0,
+        "query_has_brand":       0.0,
+        "query_has_color":       0.0,
+        "query_has_size_pattern": 1.0
+      }
+    },
+    {
+      "name": "embedded_digit_no_unit",
+      "query": "v2 charger cable",
+      "expected": {
+        "tokenize":              ["v2", "charger", "cable"],
+        "query_length_tokens":   3.0,
+        "query_has_brand":       0.0,
+        "query_has_color":       0.0,
+        "query_has_size_pattern": 0.0
+      }
+    },
+    {
+      "name": "brand_color_size_combo",
+      "query": "Adidas black 12oz water bottle",
+      "expected": {
+        "tokenize":              ["adidas", "black", "12oz", "water", "bottle"],
+        "query_length_tokens":   5.0,
+        "query_has_brand":       1.0,
+        "query_has_color":       1.0,
+        "query_has_size_pattern": 1.0
+      }
+    },
+    {
+      "name": "underscore_token",
+      "query": "navy_blue mug",
+      "expected": {
+        "tokenize":              ["navy_blue", "mug"],
+        "query_length_tokens":   2.0,
+        "query_has_brand":       0.0,
+        "query_has_color":       0.0,
+        "query_has_size_pattern": 0.0
+      }
+    }
+  ]
+}

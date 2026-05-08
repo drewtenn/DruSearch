@@ -1,0 +1,53 @@
+{
+  "index_patterns": ["products_v*"],
+  "template": {
+    "settings": {
+      "index": {
+        "number_of_shards": 1,
+        "number_of_replicas": 0,
+        "knn": true,
+        "knn.algo_param.ef_search": 100,
+        "analysis": {
+          "analyzer": {
+            "ecom_text": {
+              "type": "custom",
+              "tokenizer": "standard",
+              "filter": ["lowercase", "asciifolding", "english_stop", "english_stemmer"]
+            }
+          },
+          "filter": {
+            "english_stop":    { "type": "stop", "stopwords": "_english_" },
+            "english_stemmer": { "type": "stemmer", "language": "english" }
+          }
+        },
+        "similarity": {
+          "default": { "type": "BM25", "k1": 1.2, "b": 0.75 }
+        }
+      }
+    },
+    "mappings": {
+      "properties": {
+        "product_id":       { "type": "keyword" },
+        "title":            { "type": "text", "analyzer": "ecom_text", "fields": { "raw": { "type": "keyword" } } },
+        "description":      { "type": "text", "analyzer": "ecom_text" },
+        "bullets":          { "type": "text", "analyzer": "ecom_text" },
+        "brand":            { "type": "keyword" },
+        "color":            { "type": "keyword" },
+        "category":         { "type": "keyword" },
+        "price_cents":      { "type": "integer" },
+        "popularity_prior": { "type": "float" },
+        "ctr_prior":        { "type": "float" },
+        "title_vec": {
+          "type": "knn_vector",
+          "dimension": 384,
+          "method": {
+            "name": "hnsw",
+            "space_type": "cosinesimil",
+            "engine": "lucene",
+            "parameters": { "ef_construction": 256, "m": 16 }
+          }
+        }
+      }
+    }
+  }
+}

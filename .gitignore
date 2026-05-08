@@ -1,0 +1,40 @@
+# Data caches & artifacts
+/data/
+*.parquet
+*.csv
+
+# ML model artifacts
+*.txt.lgb
+*.onnx
+*.pkl
+mlruns/
+mlartifacts/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Go
+/services/api-go/bin/
+*.test
+*.out
+
+# Codegen
+/libs/schema/go/gen/
+/libs/schema/py/gen/
+
+# Editor/OS
+.idea/
+.vscode/
+.DS_Store
+*.swp
+
+# Local state
+.env
+.env.local
+docker-volumes/

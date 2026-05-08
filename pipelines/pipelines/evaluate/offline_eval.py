@@ -1,0 +1,401 @@
+"""Offline NDCG@10 / MRR / Recall@K evaluation against ESCI ground-truth.
+
+Two variants, both computed on the same set of ESCI test queries:
+
+  hybrid_rrf  — order returned by the API today (BM25 + k-NN, RRF-fused)
+  ltr         — re-rank the same RRF candidates with the LightGBM LambdaRank
+                model (latest MLflow version of LTR_MODEL_NAME)
+
+We score against ESCI labels: E=4, S=3, C=2, I=0 in classic-NDCG gain space.
+
+Run: docker compose --profile jobs run --rm pipelines \\
+        python -m pipelines.evaluate.offline_eval
+"""
+
+from __future__ import annotations
+
+import math
+import os
+import time
+from dataclasses import dataclass
+
+import httpx
+import lightgbm as lgb
+import mlflow
+import numpy as np
+import pandas as pd
+
+from pipelines.common import db
+from pipelines.common.config import load
+from pipelines.common.logging import configure
+from pipelines.features import FEATURE_NAMES
+from pipelines.features import transforms as tf
+
+log = configure("evaluate.offline")
+
+
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
+
+ESCI_GAIN = {"E": 4.0, "S": 3.0, "C": 2.0, "I": 0.0}
+LTR_MODEL_NAME = os.getenv("LTR_MODEL_NAME", "ltr_reranker")
+EVAL_QUERIES = int(os.getenv("EVAL_QUERIES", "500"))
+EVAL_K = int(os.getenv("EVAL_K", "10"))
+CAND_N = int(os.getenv("EVAL_CAND_N", "200"))
+
+
+# ---------------------------------------------------------------------------
+# Catalog state
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class Catalog:
+    products: pd.DataFrame
+    brand_tokens: frozenset[str]
+    color_tokens: frozenset[str]
+
+
+def _load_catalog() -> Catalog:
+    with db.conn() as c, c.cursor() as cur:
+        cur.execute(
+            """
+            SELECT product_id, title, COALESCE(brand,'') AS brand,
+                   COALESCE(color,'') AS color,
+                   COALESCE(price_cents, 0) AS price_cents,
+                   COALESCE(popularity_prior, 0) AS popularity_prior
+            FROM products
+            """
+        )
+        prod_rows = cur.fetchall()
+
+    products = pd.DataFrame(prod_rows, columns=[
+        "product_id", "title", "brand", "color", "price_cents", "popularity_prior",
+    ]).set_index("product_id")
+
+    brand_tokens = frozenset(t for b in products["brand"].dropna().unique() for t in tf.tokenize(b))
+    color_tokens = frozenset(t for c in products["color"].dropna().unique() for t in tf.tokenize(c))
+    return Catalog(products=products, brand_tokens=brand_tokens, color_tokens=color_tokens)
+
+
+def _load_test_queries(n: int) -> list[tuple[int, str]]:
+    """Pick ESCI test-split queries that have at least 5 judgments in our catalog."""
+    with db.conn() as c, c.cursor() as cur:
+        cur.execute(
+            """
+            SELECT j.query_id, j.query, COUNT(*) AS n
+            FROM esci_judgments j
+            JOIN products p ON p.product_id = j.product_id
+            WHERE j.split = 'test'
+            GROUP BY j.query_id, j.query
+            HAVING COUNT(*) >= 5
+            ORDER BY j.query_id
+            LIMIT %s
+            """,
+            (n,),
+        )
+        return [(qid, q) for (qid, q, _n) in cur.fetchall()]
+
+
+def _load_judgments(query_ids: list[int]) -> dict[int, dict[str, str]]:
+    if not query_ids:
+        return {}
+    with db.conn() as c, c.cursor() as cur:
+        cur.execute(
+            "SELECT query_id, product_id, esci_label FROM esci_judgments"
+            " WHERE query_id = ANY(%s)",
+            (list(query_ids),),
+        )
+        out: dict[int, dict[str, str]] = {}
+        for qid, pid, lbl in cur.fetchall():
+            out.setdefault(qid, {})[pid] = lbl
+        return out
+
+
+# ---------------------------------------------------------------------------
+# Retrieval (talks directly to OpenSearch + the embedder, mirroring the Go path)
+# ---------------------------------------------------------------------------
+
+class HybridRetriever:
+    def __init__(self) -> None:
+        from pipelines.common import opensearch_client
+        cfg = load()
+        self.os = opensearch_client.client()
+        self.embedder_url = cfg.embedder_url
+        self.index = os.getenv("OPENSEARCH_INDEX", "products_v1")
+        self._http = httpx.Client(timeout=30.0)
+
+    def close(self) -> None:
+        self._http.close()
+
+    def _embed(self, text: str) -> list[float]:
+        r = self._http.post(f"{self.embedder_url}/embed", json={"text": text})
+        r.raise_for_status()
+        return r.json()["vector"]
+
+    def search(self, query: str, n: int) -> list[dict]:
+        """Return [{product_id, bm25, knn, rrf, bm25_rank, knn_rank}, ...] (RRF-sorted)."""
+        body_bm25 = {
+            "size": n,
+            "_source": False,
+            "query": {"multi_match": {"query": query, "fields": ["title^2", "bullets", "description"]}},
+        }
+        bm25_resp = self.os.search(index=self.index, body=body_bm25)
+        bm25_hits = bm25_resp["hits"]["hits"]
+
+        vec = self._embed(query)
+        body_knn = {
+            "size": n,
+            "_source": False,
+            "query": {"knn": {"title_vec": {"vector": vec, "k": n}}},
+        }
+        knn_resp = self.os.search(index=self.index, body=body_knn)
+        knn_hits = knn_resp["hits"]["hits"]
+
+        merged: dict[str, dict] = {}
+        for i, h in enumerate(bm25_hits):
+            pid = h["_id"]
+            d = merged.setdefault(pid, {"product_id": pid, "bm25": 0.0, "knn": 0.0, "rrf": 0.0, "bm25_rank": 0, "knn_rank": 0})
+            d["bm25"] = h["_score"]
+            d["bm25_rank"] = i + 1
+            d["rrf"] += 1.0 / (60 + i + 1)
+        for i, h in enumerate(knn_hits):
+            pid = h["_id"]
+            d = merged.setdefault(pid, {"product_id": pid, "bm25": 0.0, "knn": 0.0, "rrf": 0.0, "bm25_rank": 0, "knn_rank": 0})
+            d["knn"] = h["_score"]
+            d["knn_rank"] = i + 1
+            d["rrf"] += 1.0 / (60 + i + 1)
+
+        out = list(merged.values())
+        out.sort(key=lambda d: -d["rrf"])
+        return out
+
+
+# ---------------------------------------------------------------------------
+# Feature builder (must match label.build_training_rows for parity)
+# ---------------------------------------------------------------------------
+
+def build_feature_matrix(query: str, hits: list[dict], cat: Catalog) -> np.ndarray:
+    n = len(hits)
+    X = np.zeros((n, len(FEATURE_NAMES)), dtype=np.float32)
+
+    qlen   = float(len(tf.tokenize(query)))
+    qbrand = tf.query_has_brand(query, cat.brand_tokens)
+    qcolor = tf.query_has_color(query, cat.color_tokens)
+    qsize  = tf.query_has_size_pattern(query)
+
+    feat_index = {name: i for i, name in enumerate(FEATURE_NAMES)}
+    for row, h in enumerate(hits):
+        pid = h["product_id"]
+
+        prod = cat.products.loc[pid] if pid in cat.products.index else None
+        title = "" if prod is None else (prod["title"] or "")
+        price = 0.0 if prod is None else float(prod["price_cents"] or 0)
+        pop   = 0.0 if prod is None else float(prod["popularity_prior"] or 0)
+
+        X[row, feat_index["bm25_score"]]             = h["bm25"]
+        X[row, feat_index["bm25_rank"]]              = h["bm25_rank"]
+        X[row, feat_index["knn_score"]]              = h["knn"]
+        X[row, feat_index["knn_rank"]]               = h["knn_rank"]
+        X[row, feat_index["rrf_score"]]              = h["rrf"]
+        X[row, feat_index["popularity_prior"]]       = pop
+        X[row, feat_index["price_log_cents"]]        = math.log1p(price)
+        X[row, feat_index["title_length_tokens"]]    = float(len(tf.tokenize(title)))
+        X[row, feat_index["query_length_tokens"]]    = qlen
+        X[row, feat_index["query_has_brand"]]        = qbrand
+        X[row, feat_index["query_has_color"]]        = qcolor
+        X[row, feat_index["query_has_size_pattern"]] = qsize
+        # user_brand_affinity: ESCI eval has no user identity; leave at 0.
+        # Phase 6 personalization is demoed via per-user /search calls,
+        # not folded into the ESCI relevance benchmark.
+        if "user_brand_affinity" in feat_index:
+            X[row, feat_index["user_brand_affinity"]] = 0.0
+
+    return X
+
+
+# ---------------------------------------------------------------------------
+# Metrics
+# ---------------------------------------------------------------------------
+
+def dcg(gains: np.ndarray, k: int) -> float:
+    gains = gains[:k]
+    if gains.size == 0:
+        return 0.0
+    return float((gains / np.log2(np.arange(2, gains.size + 2))).sum())
+
+
+def ndcg(gains_in_pred_order: np.ndarray, gains_in_ideal_order: np.ndarray, k: int) -> float:
+    idcg_v = dcg(gains_in_ideal_order, k)
+    if idcg_v == 0.0:
+        return 0.0
+    return dcg(gains_in_pred_order, k) / idcg_v
+
+
+def mrr(gains_in_pred_order: np.ndarray) -> float:
+    for i, g in enumerate(gains_in_pred_order):
+        if g >= 2.0:  # C, S, or E counts as a "relevant" hit
+            return 1.0 / (i + 1)
+    return 0.0
+
+
+def recall_at_k(judgments_for_query: dict[str, str], hit_ids: list[str], k: int) -> float:
+    relevant = {pid for pid, lbl in judgments_for_query.items() if ESCI_GAIN[lbl] >= 2.0}
+    if not relevant:
+        return 0.0
+    seen = set(hit_ids[:k]) & relevant
+    return len(seen) / len(relevant)
+
+
+# ---------------------------------------------------------------------------
+# Loaders
+# ---------------------------------------------------------------------------
+
+def _load_latest_ltr_model():
+    cfg = load()
+    mlflow.set_tracking_uri(cfg.mlflow_tracking_uri)
+    client = mlflow.tracking.MlflowClient()
+    versions = client.search_model_versions(f"name='{LTR_MODEL_NAME}'")
+    if not versions:
+        return None
+    latest = max(versions, key=lambda v: int(v.version))
+    log.info("loading LTR model name=%s version=%s", LTR_MODEL_NAME, latest.version)
+    # Pull the raw model.txt artifact (faster + closer to Go inference path)
+    run_id = latest.run_id
+    local = client.download_artifacts(run_id, "model_text/model.txt")
+    return lgb.Booster(model_file=local)
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+def main() -> int:
+    test_queries = _load_test_queries(EVAL_QUERIES)
+    if not test_queries:
+        log.error("no eligible ESCI test queries; check ingest")
+        return 1
+    log.info("evaluating on %d ESCI test queries (cand_n=%d, k=%d)",
+             len(test_queries), CAND_N, EVAL_K)
+
+    judgments = _load_judgments([qid for qid, _ in test_queries])
+    cat = _load_catalog()
+
+    booster = _load_latest_ltr_model()
+    if booster is None:
+        log.warning("no LTR model registered; only RRF baseline will be reported")
+
+    retriever = HybridRetriever()
+    try:
+        ndcg_rrf, ndcg_ltr = [], []
+        ndcg5_rrf, ndcg5_ltr = [], []
+        mrr_rrf, mrr_ltr = [], []
+        recall10_rrf, recall10_ltr = [], []
+
+        started = time.perf_counter()
+        for i, (qid, qtext) in enumerate(test_queries, 1):
+            jset = judgments.get(qid, {})
+            if not jset:
+                continue
+            hits = retriever.search(qtext, CAND_N)
+            if not hits:
+                continue
+
+            ids_rrf = [h["product_id"] for h in hits]
+            gains_all = np.array(
+                [ESCI_GAIN.get(jset.get(pid, "I"), 0.0) for pid in ids_rrf],
+                dtype=np.float64,
+            )
+
+            # Ideal: only judged products contribute (unjudged = 0)
+            ideal_gains = np.sort(np.array(list(ESCI_GAIN.get(l, 0.0) for l in jset.values())))[::-1]
+
+            ndcg_rrf.append(ndcg(gains_all, ideal_gains, EVAL_K))
+            ndcg5_rrf.append(ndcg(gains_all, ideal_gains, 5))
+            mrr_rrf.append(mrr(gains_all))
+            recall10_rrf.append(recall_at_k(jset, ids_rrf, EVAL_K))
+
+            if booster is not None:
+                X = build_feature_matrix(qtext, hits, cat)
+                preds = booster.predict(X, num_iteration=booster.best_iteration)
+                order = np.argsort(-preds)
+                ids_ltr = [hits[k]["product_id"] for k in order]
+                gains_ltr = np.array(
+                    [ESCI_GAIN.get(jset.get(pid, "I"), 0.0) for pid in ids_ltr],
+                    dtype=np.float64,
+                )
+                ndcg_ltr.append(ndcg(gains_ltr, ideal_gains, EVAL_K))
+                ndcg5_ltr.append(ndcg(gains_ltr, ideal_gains, 5))
+                mrr_ltr.append(mrr(gains_ltr))
+                recall10_ltr.append(recall_at_k(jset, ids_ltr, EVAL_K))
+
+            if i % 50 == 0:
+                log.info(
+                    "progress %d/%d  RRF NDCG@10=%.4f  LTR NDCG@10=%.4f",
+                    i, len(test_queries),
+                    float(np.mean(ndcg_rrf)) if ndcg_rrf else 0.0,
+                    float(np.mean(ndcg_ltr)) if ndcg_ltr else 0.0,
+                )
+
+        elapsed = time.perf_counter() - started
+        log.info("done in %.1fs evaluated_queries=%d", elapsed, len(ndcg_rrf))
+
+        def _mean(xs: list[float]) -> float:
+            return float(np.mean(xs)) if xs else 0.0
+
+        result = {
+            "queries_evaluated": len(ndcg_rrf),
+            "rrf": {
+                "ndcg_at_5":  _mean(ndcg5_rrf),
+                "ndcg_at_10": _mean(ndcg_rrf),
+                "mrr":        _mean(mrr_rrf),
+                "recall_at_10": _mean(recall10_rrf),
+            },
+        }
+        if booster is not None:
+            result["ltr"] = {
+                "ndcg_at_5":  _mean(ndcg5_ltr),
+                "ndcg_at_10": _mean(ndcg_ltr),
+                "mrr":        _mean(mrr_ltr),
+                "recall_at_10": _mean(recall10_ltr),
+            }
+            lift = result["ltr"]["ndcg_at_10"] - result["rrf"]["ndcg_at_10"]
+            result["ltr_lift_ndcg_at_10"] = lift
+            log.info("=" * 60)
+            log.info("RRF  NDCG@10=%.4f NDCG@5=%.4f MRR=%.4f Recall@10=%.4f",
+                     result["rrf"]["ndcg_at_10"], result["rrf"]["ndcg_at_5"], result["rrf"]["mrr"], result["rrf"]["recall_at_10"])
+            log.info("LTR  NDCG@10=%.4f NDCG@5=%.4f MRR=%.4f Recall@10=%.4f",
+                     result["ltr"]["ndcg_at_10"], result["ltr"]["ndcg_at_5"], result["ltr"]["mrr"], result["ltr"]["recall_at_10"])
+            log.info("LTR vs RRF NDCG@10 lift = %+.4f", lift)
+        else:
+            log.info("RRF  NDCG@10=%.4f NDCG@5=%.4f MRR=%.4f Recall@10=%.4f",
+                     result["rrf"]["ndcg_at_10"], result["rrf"]["ndcg_at_5"], result["rrf"]["mrr"], result["rrf"]["recall_at_10"])
+
+        # Log to MLflow as a standalone evaluation run, attached to the same experiment
+        try:
+            cfg = load()
+            mlflow.set_tracking_uri(cfg.mlflow_tracking_uri)
+            mlflow.set_experiment("drusearch-eval")
+            with mlflow.start_run(run_name=f"eval-{int(time.time())}"):
+                mlflow.log_params({
+                    "queries_evaluated": result["queries_evaluated"],
+                    "cand_n": CAND_N,
+                    "k": EVAL_K,
+                    "ltr_model_name": LTR_MODEL_NAME if booster is not None else "none",
+                })
+                for variant in ("rrf", "ltr"):
+                    if variant in result:
+                        for k, v in result[variant].items():
+                            mlflow.log_metric(f"{variant}_{k}", v)
+                if "ltr_lift_ndcg_at_10" in result:
+                    mlflow.log_metric("ltr_lift_ndcg_at_10", result["ltr_lift_ndcg_at_10"])
+        except Exception as exc:  # pragma: no cover - best-effort
+            log.warning("failed to log eval to MLflow: %s", exc)
+    finally:
+        retriever.close()
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

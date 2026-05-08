@@ -1,0 +1,188 @@
+name: drusearch
+
+x-default-env: &default-env
+  env_file: [.env]
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    <<: *default-env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-drusearch}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-drusearch}
+      POSTGRES_DB: ${POSTGRES_DB:-drusearch}
+    ports: ["5432:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/postgres:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-drusearch} -d $${POSTGRES_DB:-drusearch}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports: ["6379:6379"]
+    volumes: [redisdata:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  opensearch:
+    image: opensearchproject/opensearch:2.19.1
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - bootstrap.memory_lock=false
+      - DISABLE_SECURITY_PLUGIN=true
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+      - cluster.routing.allocation.disk.threshold_enabled=false
+      - "OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g"
+    ports:
+      - "9200:9200"
+      - "9600:9600"
+    volumes: [osdata:/usr/share/opensearch/data]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  minio:
+    image: minio/minio:RELEASE.2024-12-18T13-15-44Z
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    <<: *default-env
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-drusearch}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-drusearch1234}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes: [miniodata:/data]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/ready || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio-init:
+    image: minio/mc:RELEASE.2024-11-21T17-21-54Z
+    depends_on:
+      minio: { condition: service_healthy }
+    <<: *default-env
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD};
+        mc mb -p local/$${MINIO_BUCKET_DATA}    || true;
+        mc mb -p local/$${MINIO_BUCKET_MLFLOW}  || true;
+        echo "buckets ready"
+
+  mlflow:
+    build:
+      context: ./infra/mlflow
+      additional_contexts:
+        host_ca: ${HOST_CA_DIR:-./infra/host-ca}
+    restart: unless-stopped
+    depends_on:
+      minio: { condition: service_healthy }
+    <<: *default-env
+    environment:
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID:     ${MINIO_ROOT_USER:-drusearch}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-drusearch1234}
+    command:
+      - mlflow
+      - server
+      - --host=0.0.0.0
+      - --port=5000
+      - --backend-store-uri=sqlite:////mlflow/mlflow.db
+      - --default-artifact-root=s3://mlflow-artifacts/
+      - --serve-artifacts
+    ports: ["5000:5000"]
+    volumes: [mlflowdata:/mlflow]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request,sys; sys.exit(0) if urllib.request.urlopen(\"http://localhost:5000/health\", timeout=2).status==200 else sys.exit(1)'"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  embedder:
+    build:
+      context: ./services/embedder-py
+      additional_contexts:
+        host_ca: ${HOST_CA_DIR:-./infra/host-ca}
+    restart: unless-stopped
+    <<: *default-env
+    environment:
+      EMBEDDER_MODEL: ${EMBEDDER_MODEL:-BAAI/bge-small-en-v1.5}
+      HF_HOME: /models
+    ports: ["8000:8000"]
+    volumes: [hfmodels:/models]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request,sys; sys.exit(0) if urllib.request.urlopen(\"http://localhost:8000/healthz\", timeout=2).status==200 else sys.exit(1)'"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 60s
+
+  api:
+    build:
+      context: ./services/api-go
+      additional_contexts:
+        host_ca: ${HOST_CA_DIR:-./infra/host-ca}
+    restart: unless-stopped
+    depends_on:
+      postgres:   { condition: service_healthy }
+      redis:      { condition: service_healthy }
+      opensearch: { condition: service_healthy }
+    <<: *default-env
+    environment:
+      LTR_MODEL_DIR:  /var/lib/drusearch/models
+      LTR_MODEL_NAME: ${LTR_MODEL_NAME:-ltr_reranker}
+    ports: ["8080:8080"]
+    volumes:
+      - lgbm_models:/var/lib/drusearch/models:ro
+    healthcheck:
+      test: ["CMD", "/app/api", "healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  pipelines:
+    build:
+      context: ./pipelines
+      additional_contexts:
+        host_ca: ${HOST_CA_DIR:-./infra/host-ca}
+    profiles: ["jobs"]
+    depends_on:
+      postgres:   { condition: service_healthy }
+      opensearch: { condition: service_healthy }
+      minio:      { condition: service_healthy }
+      mlflow:     { condition: service_healthy }
+    <<: *default-env
+    environment:
+      HF_HOME: /models
+      LTR_MODEL_DIR: /lgbm_models
+      LTR_MODEL_NAME: ${LTR_MODEL_NAME:-ltr_reranker}
+    volumes:
+      - ./pipelines:/app
+      - ./infra:/app/infra:ro
+      - hfmodels:/models
+      - lgbm_models:/lgbm_models
+
+volumes:
+  pgdata:
+  redisdata:
+  osdata:
+  miniodata:
+  mlflowdata:
+  hfmodels:
+  lgbm_models:

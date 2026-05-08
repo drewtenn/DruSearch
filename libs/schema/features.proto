@@ -1,0 +1,52 @@
+// DruSearch feature schema — single source of truth for the LTR ranker.
+// Both Python (training) and Go (serving) read from this file via codegen.
+//
+// Rules:
+//   - Indices are stable. Append only; never reorder or reuse.
+//   - Source enum tells the runtime where a value comes from.
+//   - All values reach the model as float32; bools are 0.0 / 1.0.
+
+syntax = "proto3";
+
+package drusearch.schema.v1;
+
+option go_package = "github.com/drewtenn/drusearch/libs/schema/go/featurespb;featurespb";
+
+enum FeatureSource {
+  FEATURE_SOURCE_UNSPECIFIED   = 0;
+  FEATURE_SOURCE_RETRIEVAL     = 1;  // produced by the retrieval engine (BM25, k-NN, RRF)
+  FEATURE_SOURCE_STATIC_PRODUCT = 2; // baked into OpenSearch _source / Postgres
+  FEATURE_SOURCE_PRODUCT_AGG   = 3;  // offline aggregate written by Python jobs
+  FEATURE_SOURCE_ONLINE_USER   = 4;  // Redis HASH feat:user:{id}
+  FEATURE_SOURCE_ONLINE_SESSION = 5; // Redis HASH feat:session:{id}
+  FEATURE_SOURCE_INTERACTION   = 6;  // pure function of (q, p, user); see transforms.md
+}
+
+enum FeatureKind {
+  FEATURE_KIND_UNSPECIFIED = 0;
+  FEATURE_KIND_FLOAT       = 1;
+  FEATURE_KIND_INT         = 2;
+  FEATURE_KIND_BOOL        = 3;
+}
+
+message FeatureDef {
+  string        name        = 1;  // snake_case
+  uint32        index       = 2;  // stable; append-only
+  FeatureKind   kind        = 3;
+  FeatureSource source      = 4;
+  string        description = 5;
+}
+
+// Authoritative ordered list of features used by the ranker.
+// `index` matches the position in the LightGBM feature vector.
+message FeatureSchema {
+  repeated FeatureDef features = 1;
+  string version                 = 2;  // bump on append
+}
+
+// Materialised feature row for one (query, product) candidate.
+message FeatureRow {
+  string  query_id   = 1;
+  string  product_id = 2;
+  repeated float values = 3;  // length == FeatureSchema.features.size; index aligned
+}
