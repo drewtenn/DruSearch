@@ -3,6 +3,44 @@ SHELL := /bin/bash
 
 COMPOSE := docker compose
 
+define ENSURE_ADMIN_TOKEN_PY
+from pathlib import Path
+import secrets
+
+env = Path(".env")
+if not env.exists():
+    example = Path(".env.example")
+    if not example.exists():
+        raise SystemExit(".env is missing and .env.example was not found")
+    env.write_text(example.read_text())
+    print("Created .env from .env.example")
+
+lines = env.read_text().splitlines()
+changed = False
+found = False
+for i, line in enumerate(lines):
+    if line.startswith("ADMIN_TOKEN="):
+        found = True
+        value = line.split("=", 1)[1].strip().strip('"').strip("'")
+        if not value:
+            lines[i] = f"ADMIN_TOKEN={secrets.token_hex(32)}"
+            changed = True
+        break
+
+if not found:
+    if lines and lines[-1] != "":
+        lines.append("")
+    lines.append(f"ADMIN_TOKEN={secrets.token_hex(32)}")
+    changed = True
+
+if changed:
+    env.write_text("\n".join(lines) + "\n")
+    print("Wrote ADMIN_TOKEN to .env")
+else:
+    print("ADMIN_TOKEN already present in .env")
+endef
+export ENSURE_ADMIN_TOKEN_PY
+
 .PHONY: help
 help:
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n\nTargets:\n"} \
@@ -10,7 +48,7 @@ help:
 		/^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) }' $(MAKEFILE_LIST)
 
 ##@ Lifecycle — start, stop, and inspect the local app
-.PHONY: up down logs ps restart
+.PHONY: up down logs ps restart ensure-admin-token bootstrap-search
 up: ## Start every service in Docker
 	$(COMPOSE) up -d --build
 down: ## Stop every service
@@ -20,6 +58,11 @@ logs: ## Watch recent service logs
 ps: ## Show running services
 	$(COMPOSE) ps
 restart: down up ## Restart everything
+ensure-admin-token: ## Create .env if needed and fill ADMIN_TOKEN when it is blank
+	@python3 -c "$$ENSURE_ADMIN_TOKEN_PY"
+bootstrap-search: ensure-admin-token up ready seed-databases embed-vectors simulate refresh-product-features refresh-user-features build-training-rows train-ltr promote-model ## Cold-start search: data, vectors, clicks, features, model, and API reload
+	$(COMPOSE) up -d --no-deps --force-recreate api
+	$(MAKE) reload-model
 
 .PHONY: ready
 ready: ## Wait until the API says its dependencies are reachable
@@ -74,7 +117,9 @@ reload-model: ## Ask the running API to load the latest promoted model
 		-H "Authorization: Bearer $$admin_token" | python3 -m json.tool
 
 ##@ Phase 6 — add simple per-user preferences
-.PHONY: refresh-user-features
+.PHONY: refresh-product-features refresh-user-features
+refresh-product-features: ## Summarize product impressions, clicks, and purchases into Postgres
+	$(COMPOSE) --profile jobs run --rm pipelines python -m pipelines.features.aggregates
 refresh-user-features: ## Summarize each user's clicked brands into Redis
 	$(COMPOSE) --profile jobs run --rm pipelines python -m pipelines.features.user_aggs
 
