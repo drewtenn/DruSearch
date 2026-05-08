@@ -60,7 +60,19 @@ ps: ## Show running services
 restart: down up ## Restart everything
 ensure-admin-token: ## Create .env if needed and fill ADMIN_TOKEN when it is blank
 	@python3 -c "$$ENSURE_ADMIN_TOKEN_PY"
-bootstrap-search: ensure-admin-token up ready seed-databases embed-vectors simulate refresh-product-features refresh-user-features build-training-rows train-ltr promote-model ## Cold-start search: data, vectors, clicks, features, model, and API reload
+bootstrap-search: ## Cold-start search: data, vectors, clicks, features, model, and API reload
+	$(MAKE) ensure-admin-token
+	$(MAKE) up
+	$(MAKE) ready
+	$(MAKE) seed-databases
+	$(MAKE) embed-vectors
+	$(MAKE) simulate
+	$(MAKE) refresh-product-features
+	$(MAKE) refresh-user-features
+	$(MAKE) build-training-rows
+	$(MAKE) train-ltr
+	$(MAKE) promote-model
+	$(MAKE) verify-promoted-model
 	$(COMPOSE) up -d --no-deps --force-recreate api
 	$(MAKE) reload-model
 
@@ -75,8 +87,8 @@ ready: ## Wait until the API says its dependencies are reachable
 ##@ Phase 1 — load products and build basic text search
 .PHONY: seed-databases seed-catalog index-bm25
 seed-databases: seed-catalog index-bm25 ## Load sample products, then make them searchable
-seed-catalog: ## Put sample product and query-label data into Postgres
-	$(COMPOSE) run --rm pipelines python -m pipelines.ingest.esci
+seed-catalog: ## Put Amazon Reviews 2023 product metadata into Postgres
+	$(COMPOSE) run --rm pipelines python -m pipelines.ingest.amazon_reviews
 index-bm25: ## Build the OpenSearch keyword index used by /search
 	$(COMPOSE) run --rm pipelines python -m pipelines.index.bm25
 
@@ -91,18 +103,22 @@ simulate: ## Generate fake searches, clicks, and purchases for training data
 	$(COMPOSE) run --rm pipelines python -m pipelines.simulate.click_simulator
 
 ##@ Phase 4 — teach and check a ranking model
-.PHONY: build-training-rows train-ltr eval
+.PHONY: build-training-rows train-ltr retrain-model retrain-model-with-sim eval
 build-training-rows: ## Convert logged behavior into examples the model can learn from
 	$(COMPOSE) run --rm pipelines python -m pipelines.label.build_training_rows
 train-ltr: ## Train a model to reorder search results toward better matches
 	$(COMPOSE) run --rm pipelines python -m pipelines.train.lgbm_ranker
+retrain-model: refresh-product-features refresh-user-features build-training-rows train-ltr promote-model verify-promoted-model reload-model ## Retrain and reload LTR from existing events
+retrain-model-with-sim: simulate retrain-model ## Generate fresh simulated events, then retrain and reload LTR
 eval: ## Measure ranking quality without changing the live API
 	$(COMPOSE) run --rm pipelines python -m pipelines.evaluate.offline_eval
 
 ##@ Phase 5 — put the trained ranking model behind the API
-.PHONY: promote-model reload-model
+.PHONY: promote-model verify-promoted-model reload-model
 promote-model: ## Copy the chosen trained model where the API can read it
 	$(COMPOSE) --profile jobs run --rm -e LTR_MODEL_STAGE= pipelines python -m pipelines.register.promote
+verify-promoted-model: ## Fail early if the API model file has not been promoted
+	$(COMPOSE) --profile jobs run --rm pipelines sh -c 'test -s "$${LTR_MODEL_DIR:-/lgbm_models}/$${LTR_MODEL_NAME:-ltr_reranker}.txt"'
 reload-model: ## Ask the running API to load the latest promoted model
 	@set -euo pipefail; \
 	admin_token="$${ADMIN_TOKEN:-}"; \

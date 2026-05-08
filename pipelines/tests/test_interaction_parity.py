@@ -13,8 +13,12 @@ import json
 from pathlib import Path
 
 from pipelines.features.transforms import (
+    gender_intent_match,
+    gender_intent_mismatch,
+    product_gender,
     query_has_brand,
     query_has_color,
+    query_gender_intent,
     query_has_size_pattern,
     query_length_tokens,
     tokenize,
@@ -72,6 +76,23 @@ def test_interaction_parity_fixtures():
         if got_qhs != exp["query_has_size_pattern"]:
             failures.append(f"{case['name']}: query_has_size_pattern({q!r}) = {got_qhs}, want {exp['query_has_size_pattern']}")
 
+        category_path = case.get("category_path", [])
+        got_qgi = query_gender_intent(q)
+        if got_qgi != exp["query_gender_intent"]:
+            failures.append(f"{case['name']}: query_gender_intent({q!r}) = {got_qgi}, want {exp['query_gender_intent']}")
+
+        got_pg = product_gender(category_path)
+        if got_pg != exp["product_gender"]:
+            failures.append(f"{case['name']}: product_gender({category_path!r}) = {got_pg}, want {exp['product_gender']}")
+
+        got_gim = gender_intent_match(got_qgi, got_pg)
+        if got_gim != exp["gender_intent_match"]:
+            failures.append(f"{case['name']}: gender_intent_match({got_qgi}, {got_pg}) = {got_gim}, want {exp['gender_intent_match']}")
+
+        got_gix = gender_intent_mismatch(got_qgi, got_pg)
+        if got_gix != exp["gender_intent_mismatch"]:
+            failures.append(f"{case['name']}: gender_intent_mismatch({got_qgi}, {got_pg}) = {got_gix}, want {exp['gender_intent_mismatch']}")
+
     assert not failures, "interaction-feature parity drift:\n  " + "\n  ".join(failures)
 
 
@@ -84,4 +105,4 @@ def test_schema_matches_generated():
         f"FEATURE_NAMES drift: {FEATURE_NAMES} vs {gen.FEATURE_NAMES}"
     )
     assert NUM_FEATURES == gen.NUM_FEATURES
-    assert gen.SCHEMA_VERSION == "v1"
+    assert gen.SCHEMA_VERSION == "v2"

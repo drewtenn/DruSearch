@@ -16,13 +16,16 @@ CREATE TABLE IF NOT EXISTS products (
   color             TEXT,
   price_cents       INTEGER,
   category          TEXT,
+  category_path     TEXT[]      NOT NULL DEFAULT ARRAY[]::TEXT[],
   popularity_prior  REAL        NOT NULL DEFAULT 0,
+  raw_metadata      JSONB       NOT NULL DEFAULT '{}'::jsonb,
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS products_brand_idx    ON products(brand);
 CREATE INDEX IF NOT EXISTS products_category_idx ON products(category);
+CREATE INDEX IF NOT EXISTS products_category_path_gin_idx ON products USING GIN(category_path);
 
 -- ---------------------------------------------------------------------------
 -- ESCI judgments (offline eval only; not used at serve time)

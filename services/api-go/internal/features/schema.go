@@ -9,21 +9,25 @@
 package features
 
 const (
-	IdxBM25Score          = 0
-	IdxBM25Rank           = 1
-	IdxKNNScore           = 2
-	IdxKNNRank            = 3
-	IdxRRFScore           = 4
-	IdxPopularityPrior    = 5
-	IdxPriceLogCents      = 6
-	IdxTitleLengthTokens  = 7
-	IdxQueryLengthTokens  = 8
-	IdxQueryHasBrand      = 9
-	IdxQueryHasColor      = 10
-	IdxQueryHasSizePat    = 11
-	IdxUserBrandAffinity  = 12
+	IdxBM25Score         = 0
+	IdxBM25Rank          = 1
+	IdxKNNScore          = 2
+	IdxKNNRank           = 3
+	IdxRRFScore          = 4
+	IdxPopularityPrior   = 5
+	IdxPriceLogCents     = 6
+	IdxTitleLengthTokens = 7
+	IdxQueryLengthTokens = 8
+	IdxQueryHasBrand     = 9
+	IdxQueryHasColor     = 10
+	IdxQueryHasSizePat   = 11
+	IdxUserBrandAffinity = 12
+	IdxQueryGenderIntent = 13
+	IdxProductGender     = 14
+	IdxGenderIntentMatch = 15
+	IdxGenderIntentMis   = 16
 
-	NumFeatures = 13
+	NumFeatures = 17
 )
 
 // Names ordered by their feature index above.
@@ -41,4 +45,8 @@ var Names = [...]string{
 	"query_has_color",
 	"query_has_size_pattern",
 	"user_brand_affinity",
+	"query_gender_intent",
+	"product_gender",
+	"gender_intent_match",
+	"gender_intent_mismatch",
 }

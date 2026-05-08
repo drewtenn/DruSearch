@@ -15,13 +15,15 @@ make up            # docker compose up -d
 make ready         # wait for /readyz
 
 # Load demo data before calling /search
-make seed-databases # ESCI -> Postgres + OpenSearch products_v1
+make seed-databases # Amazon Reviews 2023 -> Postgres + OpenSearch products_v1
 
 # Optional: add dense vectors for the k-NN side of hybrid retrieval
 make embed-vectors
 ```
 
 `make ready` checks that the services are reachable. It does not load the catalog or create the `products_v1` search index; run `make seed-databases` on a fresh stack before using `/search`.
+
+By default, `make seed-catalog` streams 10,000 products from the Amazon Reviews 2023 `Clothing_Shoes_and_Jewelry` metadata file. Set `AMAZON_REVIEWS_CATEGORY`, `AMAZON_REVIEWS_TARGET_PRODUCTS`, `AMAZON_REVIEWS_META_URL`, or `AMAZON_REVIEWS_META_FILE` in `.env` to choose a different category, sample size, mirror URL, or local JSONL/JSONL.GZ file.
 
 ## API
 
@@ -93,7 +95,8 @@ Response:
       "title": "Trail Running Shoe",
       "brand": "Acme",
       "color": "black",
-      "category": "shoes",
+      "category": "Running",
+      "category_path": ["Men", "Shoes", "Athletic", "Running"],
       "price_cents": 7999,
       "score": 2.41,
       "explain": {
@@ -160,9 +163,16 @@ Response:
   "bullet_points": "Durable outsole; Breathable upper",
   "brand": "Acme",
   "color": "black",
-  "category": "shoes",
+  "category": "Running",
+  "category_path": ["Men", "Shoes", "Athletic", "Running"],
   "locale": "us",
-  "price_cents": 7999
+  "price_cents": 7999,
+  "raw_metadata": {
+    "parent_asin": "B000123",
+    "title": "Trail Running Shoe",
+    "price": "79.99",
+    "rating_number": 120
+  }
 }
 ```
 

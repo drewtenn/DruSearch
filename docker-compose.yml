@@ -175,6 +175,7 @@ services:
     volumes:
       - ./pipelines:/app
       - ./infra:/app/infra:ro
+      - ./libs:/libs:ro
       - hfmodels:/models
       - lgbm_models:/lgbm_models
 

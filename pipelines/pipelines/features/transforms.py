@@ -17,6 +17,34 @@ _SIZE_RE = re.compile(
     re.IGNORECASE,
 )
 
+GENDER_NONE = 0.0
+GENDER_MEN = 1.0
+GENDER_WOMEN = 2.0
+GENDER_BOYS = 3.0
+GENDER_GIRLS = 4.0
+
+_QUERY_GENDER_TOKENS = {
+    "men": GENDER_MEN,
+    "mens": GENDER_MEN,
+    "man": GENDER_MEN,
+    "male": GENDER_MEN,
+    "women": GENDER_WOMEN,
+    "womens": GENDER_WOMEN,
+    "woman": GENDER_WOMEN,
+    "female": GENDER_WOMEN,
+    "boys": GENDER_BOYS,
+    "boy": GENDER_BOYS,
+    "girls": GENDER_GIRLS,
+    "girl": GENDER_GIRLS,
+}
+
+_CATEGORY_GENDER_VALUES = {
+    "men": GENDER_MEN,
+    "women": GENDER_WOMEN,
+    "boys": GENDER_BOYS,
+    "girls": GENDER_GIRLS,
+}
+
 
 def tokenize(s: str | None) -> list[str]:
     if not s:
@@ -38,3 +66,26 @@ def query_has_color(query: str | None, known_colors_lower: frozenset[str]) -> fl
 
 def query_has_size_pattern(query: str | None) -> float:
     return 1.0 if (query and _SIZE_RE.search(query)) else 0.0
+
+
+def query_gender_intent(query: str | None) -> float:
+    found = {g for t in tokenize(query) if (g := _QUERY_GENDER_TOKENS.get(t))}
+    return found.pop() if len(found) == 1 else GENDER_NONE
+
+
+def product_gender(category_path: list[str] | tuple[str, ...] | None) -> float:
+    if not category_path:
+        return GENDER_NONE
+    for part in category_path:
+        gender = _CATEGORY_GENDER_VALUES.get(str(part).strip().lower())
+        if gender:
+            return gender
+    return GENDER_NONE
+
+
+def gender_intent_match(query_gender: float, product_gender_value: float) -> float:
+    return 1.0 if query_gender and query_gender == product_gender_value else 0.0
+
+
+def gender_intent_mismatch(query_gender: float, product_gender_value: float) -> float:
+    return 1.0 if query_gender and product_gender_value and query_gender != product_gender_value else 0.0

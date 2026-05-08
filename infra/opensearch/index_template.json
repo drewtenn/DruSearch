@@ -34,6 +34,7 @@
         "brand":            { "type": "keyword" },
         "color":            { "type": "keyword" },
         "category":         { "type": "keyword" },
+        "category_path":    { "type": "text", "analyzer": "ecom_text", "fields": { "raw": { "type": "keyword" } } },
         "price_cents":      { "type": "integer" },
         "popularity_prior": { "type": "float" },
         "ctr_prior":        { "type": "float" },

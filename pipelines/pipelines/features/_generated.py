@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-SCHEMA_VERSION = "v1"
+SCHEMA_VERSION = "v2"
 
 @dataclass(frozen=True)
 class GeneratedFeature:
@@ -29,6 +29,10 @@ FEATURES: tuple[GeneratedFeature, ...] = (
     GeneratedFeature(index=10, name="query_has_color", kind="BOOL", source="INTERACTION", description="Query contains a known color token (0/1)"),
     GeneratedFeature(index=11, name="query_has_size_pattern", kind="BOOL", source="INTERACTION", description="Query matches `\\b\\d+(?:\\.\\d+)?\\s?(oz|ml|gb|tb|in|cm|mm|kg|lb|l|g)\\b` (0/1)"),
     GeneratedFeature(index=12, name="user_brand_affinity", kind="FLOAT", source="ONLINE_USER", description="User's click-share for the candidate's brand in [0,1]; 0 if unknown user"),
+    GeneratedFeature(index=13, name="query_gender_intent", kind="INT", source="INTERACTION", description="Requested gender inferred from query: 0=none, 1=men, 2=women, 3=boys, 4=girls"),
+    GeneratedFeature(index=14, name="product_gender", kind="INT", source="STATIC_PRODUCT", description="Product gender inferred from category path: 0=none, 1=men, 2=women, 3=boys, 4=girls"),
+    GeneratedFeature(index=15, name="gender_intent_match", kind="BOOL", source="INTERACTION", description="1 when query_gender_intent is known and equals product_gender"),
+    GeneratedFeature(index=16, name="gender_intent_mismatch", kind="BOOL", source="INTERACTION", description="1 when query_gender_intent and product_gender are known but differ"),
 )
 
 FEATURE_NAMES: tuple[str, ...] = tuple(f.name for f in FEATURES)
@@ -47,3 +51,7 @@ IDX_QUERY_HAS_BRAND = 9
 IDX_QUERY_HAS_COLOR = 10
 IDX_QUERY_HAS_SIZE_PATTERN = 11
 IDX_USER_BRAND_AFFINITY = 12
+IDX_QUERY_GENDER_INTENT = 13
+IDX_PRODUCT_GENDER = 14
+IDX_GENDER_INTENT_MATCH = 15
+IDX_GENDER_INTENT_MISMATCH = 16

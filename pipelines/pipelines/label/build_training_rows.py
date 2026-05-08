@@ -80,7 +80,8 @@ def _load_products() -> pd.DataFrame:
             SELECT product_id, title, COALESCE(brand,'') AS brand,
                    COALESCE(color,'') AS color,
                    COALESCE(price_cents, 0) AS price_cents,
-                   COALESCE(popularity_prior, 0) AS popularity_prior
+                   COALESCE(popularity_prior, 0) AS popularity_prior,
+                   COALESCE(category_path, ARRAY[]::TEXT[]) AS category_path
             FROM products
             """
         )
@@ -175,6 +176,16 @@ def main() -> int:
     df["query_has_brand"]        = df["query"].apply(lambda q: tf.query_has_brand(q, brand_token_set))
     df["query_has_color"]        = df["query"].apply(lambda q: tf.query_has_color(q, color_token_set))
     df["query_has_size_pattern"] = df["query"].apply(tf.query_has_size_pattern)
+    df["query_gender_intent"]    = df["query"].apply(tf.query_gender_intent)
+    df["product_gender"]         = df["category_path"].apply(tf.product_gender)
+    df["gender_intent_match"] = [
+        tf.gender_intent_match(qg, pg)
+        for qg, pg in zip(df["query_gender_intent"], df["product_gender"])
+    ]
+    df["gender_intent_mismatch"] = [
+        tf.gender_intent_mismatch(qg, pg)
+        for qg, pg in zip(df["query_gender_intent"], df["product_gender"])
+    ]
 
     # Mask a deterministic fraction of (query_id, user_id) pairs to '' so
     # the model has training signal for the anonymous case. We mask by

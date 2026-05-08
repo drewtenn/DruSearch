@@ -32,6 +32,10 @@ func TestSchemaMatchesGenerated(t *testing.T) {
 		IdxQueryHasColor:     "query_has_color",
 		IdxQueryHasSizePat:   "query_has_size_pattern",
 		IdxUserBrandAffinity: "user_brand_affinity",
+		IdxQueryGenderIntent: "query_gender_intent",
+		IdxProductGender:     "product_gender",
+		IdxGenderIntentMatch: "gender_intent_match",
+		IdxGenderIntentMis:   "gender_intent_mismatch",
 	}
 	for idx, name := range indexExpect {
 		if Names[idx] != name {

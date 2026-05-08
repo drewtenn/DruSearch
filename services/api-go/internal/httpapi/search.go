@@ -21,14 +21,15 @@ import (
 )
 
 type SearchResult struct {
-	ProductID  string  `json:"product_id"`
-	Title      string  `json:"title"`
-	Brand      string  `json:"brand"`
-	Color      string  `json:"color"`
-	Category   string  `json:"category,omitempty"`
-	PriceCents int     `json:"price_cents"`
-	Score      float64 `json:"score"`
-	Explain    explain `json:"explain"`
+	ProductID    string   `json:"product_id"`
+	Title        string   `json:"title"`
+	Brand        string   `json:"brand"`
+	Color        string   `json:"color"`
+	Category     string   `json:"category,omitempty"`
+	CategoryPath []string `json:"category_path,omitempty"`
+	PriceCents   int      `json:"price_cents"`
+	Score        float64  `json:"score"`
+	Explain      explain  `json:"explain"`
 }
 
 type explain struct {
@@ -137,13 +138,14 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 			score = sh.BM25
 		}
 		results = append(results, SearchResult{
-			ProductID:  sh.ProductID,
-			Title:      sh.Title,
-			Brand:      sh.Brand,
-			Color:      sh.Color,
-			Category:   sh.Category,
-			PriceCents: sh.PriceCents,
-			Score:      score,
+			ProductID:    sh.ProductID,
+			Title:        sh.Title,
+			Brand:        sh.Brand,
+			Color:        sh.Color,
+			Category:     sh.Category,
+			CategoryPath: sh.CategoryPath,
+			PriceCents:   sh.PriceCents,
+			Score:        score,
 			Explain: explain{
 				BM25:     sh.BM25,
 				BM25Rank: sh.BM25Rank,

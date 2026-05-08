@@ -59,6 +59,7 @@ func BuildMatrix(query string, hits []retrieval.Hit, vocab *Vocab, user *UserFea
 	qBrand := QueryHasAny(query, vocab.Brand)
 	qColor := QueryHasAny(query, vocab.Color)
 	qSize := QueryHasSizePattern(query)
+	qGender := QueryGenderIntent(query)
 
 	var brandAff map[string]float64
 	if user != nil {
@@ -67,18 +68,23 @@ func BuildMatrix(query string, hits []retrieval.Hit, vocab *Vocab, user *UserFea
 
 	for i, h := range hits {
 		off := i * NumFeatures
-		out[off+IdxBM25Score]         = h.BM25
-		out[off+IdxBM25Rank]          = float64(h.BM25Rank)
-		out[off+IdxKNNScore]          = h.KNN
-		out[off+IdxKNNRank]           = float64(h.KNNRank)
-		out[off+IdxRRFScore]          = h.RRF
-		out[off+IdxPopularityPrior]   = h.PopularityPrior
-		out[off+IdxPriceLogCents]     = math.Log1p(float64(h.PriceCents))
+		out[off+IdxBM25Score] = h.BM25
+		out[off+IdxBM25Rank] = float64(h.BM25Rank)
+		out[off+IdxKNNScore] = h.KNN
+		out[off+IdxKNNRank] = float64(h.KNNRank)
+		out[off+IdxRRFScore] = h.RRF
+		out[off+IdxPopularityPrior] = h.PopularityPrior
+		out[off+IdxPriceLogCents] = math.Log1p(float64(h.PriceCents))
 		out[off+IdxTitleLengthTokens] = float64(len(Tokenize(h.Title)))
 		out[off+IdxQueryLengthTokens] = qLen
-		out[off+IdxQueryHasBrand]     = qBrand
-		out[off+IdxQueryHasColor]     = qColor
-		out[off+IdxQueryHasSizePat]   = qSize
+		out[off+IdxQueryHasBrand] = qBrand
+		out[off+IdxQueryHasColor] = qColor
+		out[off+IdxQueryHasSizePat] = qSize
+		pGender := ProductGender(h.CategoryPath)
+		out[off+IdxQueryGenderIntent] = qGender
+		out[off+IdxProductGender] = pGender
+		out[off+IdxGenderIntentMatch] = GenderIntentMatch(qGender, pGender)
+		out[off+IdxGenderIntentMis] = GenderIntentMismatch(qGender, pGender)
 		if brandAff != nil {
 			out[off+IdxUserBrandAffinity] = brandAff[h.Brand]
 		}

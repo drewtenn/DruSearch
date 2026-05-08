@@ -53,6 +53,10 @@ FEATURES: tuple[FeatureDef, ...] = (
     FeatureDef("query_has_color",       Source.INTERACTION,    "Query contains a known color token (0/1)"),
     FeatureDef("query_has_size_pattern", Source.INTERACTION,   r"Query matches \b\d+(?:\.\d+)?\s?(oz|ml|gb|tb|in|cm|mm|kg|lb)\b (0/1)"),
     FeatureDef("user_brand_affinity",   Source.ONLINE_USER,    "User's click-share for the candidate's brand in [0,1]; 0 if unknown user"),
+    FeatureDef("query_gender_intent",   Source.INTERACTION,    "Requested gender inferred from query: 0=none, 1=men, 2=women, 3=boys, 4=girls"),
+    FeatureDef("product_gender",        Source.STATIC_PRODUCT, "Product gender inferred from category path: 0=none, 1=men, 2=women, 3=boys, 4=girls"),
+    FeatureDef("gender_intent_match",   Source.INTERACTION,    "1 when query_gender_intent is known and equals product_gender"),
+    FeatureDef("gender_intent_mismatch", Source.INTERACTION,   "1 when query_gender_intent and product_gender are known but differ"),
 )
 
 FEATURE_NAMES: tuple[str, ...] = tuple(f.name for f in FEATURES)

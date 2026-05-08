@@ -31,9 +31,10 @@ type fixtureFile struct {
 }
 
 type fixtureCase struct {
-	Name     string         `json:"name"`
-	Query    string         `json:"query"`
-	Expected fixtureExpects `json:"expected"`
+	Name         string         `json:"name"`
+	Query        string         `json:"query"`
+	CategoryPath []string       `json:"category_path"`
+	Expected     fixtureExpects `json:"expected"`
 }
 
 type fixtureExpects struct {
@@ -42,6 +43,10 @@ type fixtureExpects struct {
 	QueryHasBrand        float64  `json:"query_has_brand"`
 	QueryHasColor        float64  `json:"query_has_color"`
 	QueryHasSizePattern  float64  `json:"query_has_size_pattern"`
+	QueryGenderIntent    float64  `json:"query_gender_intent"`
+	ProductGender        float64  `json:"product_gender"`
+	GenderIntentMatch    float64  `json:"gender_intent_match"`
+	GenderIntentMismatch float64  `json:"gender_intent_mismatch"`
 }
 
 // TestInteractionParityFixtures runs the Go reference transforms against the
@@ -82,6 +87,20 @@ func TestInteractionParityFixtures(t *testing.T) {
 			}
 			if v := QueryHasSizePattern(c.Query); v != c.Expected.QueryHasSizePattern {
 				t.Errorf("QueryHasSizePattern(%q) = %v, want %v", c.Query, v, c.Expected.QueryHasSizePattern)
+			}
+			qg := QueryGenderIntent(c.Query)
+			if qg != c.Expected.QueryGenderIntent {
+				t.Errorf("QueryGenderIntent(%q) = %v, want %v", c.Query, qg, c.Expected.QueryGenderIntent)
+			}
+			pg := ProductGender(c.CategoryPath)
+			if pg != c.Expected.ProductGender {
+				t.Errorf("ProductGender(%#v) = %v, want %v", c.CategoryPath, pg, c.Expected.ProductGender)
+			}
+			if v := GenderIntentMatch(qg, pg); v != c.Expected.GenderIntentMatch {
+				t.Errorf("GenderIntentMatch(%v, %v) = %v, want %v", qg, pg, v, c.Expected.GenderIntentMatch)
+			}
+			if v := GenderIntentMismatch(qg, pg); v != c.Expected.GenderIntentMismatch {
+				t.Errorf("GenderIntentMismatch(%v, %v) = %v, want %v", qg, pg, v, c.Expected.GenderIntentMismatch)
 			}
 		})
 	}

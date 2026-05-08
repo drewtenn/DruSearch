@@ -44,11 +44,11 @@ def _iter_docs() -> Iterable[dict]:
         cur.execute(
             "SELECT product_id, title, COALESCE(description, ''), COALESCE(bullet_points, ''),"
             " COALESCE(brand, ''), COALESCE(color, ''), COALESCE(category, ''),"
-            " COALESCE(price_cents, 0), COALESCE(popularity_prior, 0)"
+            " category_path, COALESCE(price_cents, 0), COALESCE(popularity_prior, 0)"
             " FROM products"
         )
         for row in cur:
-            pid, title, desc, bullets, brand, color, cat, price, pop = row
+            pid, title, desc, bullets, brand, color, cat, cat_path, price, pop = row
             yield {
                 "_index": INDEX_NAME,
                 "_id": pid,
@@ -60,6 +60,7 @@ def _iter_docs() -> Iterable[dict]:
                     "brand":            brand or None,
                     "color":            color or None,
                     "category":         cat or None,
+                    "category_path":    cat_path or [],
                     "price_cents":      int(price),
                     "popularity_prior": float(pop),
                     "ctr_prior":        0.0,

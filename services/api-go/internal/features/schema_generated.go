@@ -3,7 +3,7 @@
 
 package features
 
-const SchemaVersion = "v1"
+const SchemaVersion = "v2"
 
 const (
 	GenBm25Score = 0
@@ -19,8 +19,12 @@ const (
 	GenQueryHasColor = 10
 	GenQueryHasSizePattern = 11
 	GenUserBrandAffinity = 12
+	GenQueryGenderIntent = 13
+	GenProductGender = 14
+	GenGenderIntentMatch = 15
+	GenGenderIntentMismatch = 16
 
-	GenNumFeatures = 13
+	GenNumFeatures = 17
 )
 
 // GenNames is the ordered feature-name list aligned with the indices above.
@@ -38,4 +42,8 @@ var GenNames = [...]string{
 	"query_has_color",
 	"query_has_size_pattern",
 	"user_brand_affinity",
+	"query_gender_intent",
+	"product_gender",
+	"gender_intent_match",
+	"gender_intent_mismatch",
 }

@@ -1,5 +1,5 @@
 {
-  "version": "v1",
+  "version": "v2",
   "_comment": "Canonical LTR feature schema. Source of truth for both Python (training) and Go (serving). Append-only — never reorder, never re-use indices. Run `make check-feature-parity` after editing; it regenerates the language-specific files and fails CI if they drift.",
   "features": [
     {"index": 0,  "name": "bm25_score",            "kind": "FLOAT", "source": "RETRIEVAL",      "description": "BM25 raw score"},
@@ -14,6 +14,10 @@
     {"index": 9,  "name": "query_has_brand",       "kind": "BOOL",  "source": "INTERACTION",    "description": "Query contains a known brand token (0/1)"},
     {"index": 10, "name": "query_has_color",       "kind": "BOOL",  "source": "INTERACTION",    "description": "Query contains a known color token (0/1)"},
     {"index": 11, "name": "query_has_size_pattern","kind": "BOOL",  "source": "INTERACTION",    "description": "Query matches `\\b\\d+(?:\\.\\d+)?\\s?(oz|ml|gb|tb|in|cm|mm|kg|lb|l|g)\\b` (0/1)"},
-    {"index": 12, "name": "user_brand_affinity",   "kind": "FLOAT", "source": "ONLINE_USER",    "description": "User's click-share for the candidate's brand in [0,1]; 0 if unknown user"}
+    {"index": 12, "name": "user_brand_affinity",   "kind": "FLOAT", "source": "ONLINE_USER",    "description": "User's click-share for the candidate's brand in [0,1]; 0 if unknown user"},
+    {"index": 13, "name": "query_gender_intent",   "kind": "INT",   "source": "INTERACTION",    "description": "Requested gender inferred from query: 0=none, 1=men, 2=women, 3=boys, 4=girls"},
+    {"index": 14, "name": "product_gender",        "kind": "INT",   "source": "STATIC_PRODUCT", "description": "Product gender inferred from category path: 0=none, 1=men, 2=women, 3=boys, 4=girls"},
+    {"index": 15, "name": "gender_intent_match",   "kind": "BOOL",  "source": "INTERACTION",    "description": "1 when query_gender_intent is known and equals product_gender"},
+    {"index": 16, "name": "gender_intent_mismatch","kind": "BOOL",  "source": "INTERACTION",    "description": "1 when query_gender_intent and product_gender are known but differ"}
   ]
 }

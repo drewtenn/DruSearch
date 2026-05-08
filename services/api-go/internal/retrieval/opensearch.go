@@ -7,9 +7,19 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
+	"unicode"
 
 	opensearch "github.com/opensearch-project/opensearch-go/v4"
+)
+
+const (
+	retrievalGenderNone = iota
+	retrievalGenderMen
+	retrievalGenderWomen
+	retrievalGenderBoys
+	retrievalGenderGirls
 )
 
 type Engine struct {
@@ -22,28 +32,30 @@ func New(c *opensearch.Client, index string) *Engine {
 }
 
 type Hit struct {
-	ProductID       string  `json:"product_id"`
-	Title           string  `json:"title"`
-	Brand           string  `json:"brand"`
-	Color           string  `json:"color"`
-	Category        string  `json:"category"`
-	PriceCents      int     `json:"price_cents"`
-	PopularityPrior float64 `json:"popularity_prior"`
-	BM25            float64 `json:"bm25"`
-	BM25Rank        int     `json:"bm25_rank"`
-	KNN             float64 `json:"knn"`
-	KNNRank         int     `json:"knn_rank"`
-	RRF             float64 `json:"rrf"`
+	ProductID       string   `json:"product_id"`
+	Title           string   `json:"title"`
+	Brand           string   `json:"brand"`
+	Color           string   `json:"color"`
+	Category        string   `json:"category"`
+	CategoryPath    []string `json:"category_path"`
+	PriceCents      int      `json:"price_cents"`
+	PopularityPrior float64  `json:"popularity_prior"`
+	BM25            float64  `json:"bm25"`
+	BM25Rank        int      `json:"bm25_rank"`
+	KNN             float64  `json:"knn"`
+	KNNRank         int      `json:"knn_rank"`
+	RRF             float64  `json:"rrf"`
 }
 
 type osSource struct {
-	ProductID       string  `json:"product_id"`
-	Title           string  `json:"title"`
-	Brand           string  `json:"brand"`
-	Color           string  `json:"color"`
-	Category        string  `json:"category"`
-	PriceCents      int     `json:"price_cents"`
-	PopularityPrior float64 `json:"popularity_prior"`
+	ProductID       string   `json:"product_id"`
+	Title           string   `json:"title"`
+	Brand           string   `json:"brand"`
+	Color           string   `json:"color"`
+	Category        string   `json:"category"`
+	CategoryPath    []string `json:"category_path"`
+	PriceCents      int      `json:"price_cents"`
+	PopularityPrior float64  `json:"popularity_prior"`
 }
 
 type rawHit struct {
@@ -94,39 +106,61 @@ func (e *Engine) doSearch(ctx context.Context, body []byte) ([]rawHit, error) {
 }
 
 func sourceFields() []string {
-	return []string{"product_id", "title", "brand", "color", "category", "price_cents", "popularity_prior"}
+	return []string{"product_id", "title", "brand", "color", "category", "category_path", "price_cents", "popularity_prior"}
+}
+
+func buildBM25Body(query string, k int) ([]byte, error) {
+	baseQuery := map[string]any{
+		"multi_match": map[string]any{
+			"query":  query,
+			"fields": []string{"title^2", "category_path^2", "category^1.5", "bullets", "description"},
+		},
+	}
+	searchQuery := baseQuery
+	if filter := genderCategoryFilter(query); filter != nil {
+		searchQuery = map[string]any{
+			"bool": map[string]any{
+				"must":   []any{baseQuery},
+				"filter": []any{filter},
+			},
+		}
+	}
+	return json.Marshal(map[string]any{
+		"size":    k,
+		"_source": sourceFields(),
+		"query":   searchQuery,
+	})
 }
 
 func (e *Engine) bm25Raw(ctx context.Context, query string, k int) ([]rawHit, error) {
-	body, err := json.Marshal(map[string]any{
-		"size":    k,
-		"_source": sourceFields(),
-		"query": map[string]any{
-			"multi_match": map[string]any{
-				"query":  query,
-				"fields": []string{"title^2", "bullets", "description"},
-			},
-		},
-	})
+	body, err := buildBM25Body(query, k)
 	if err != nil {
 		return nil, err
 	}
 	return e.doSearch(ctx, body)
 }
 
-func (e *Engine) knnRaw(ctx context.Context, vec []float32, k int) ([]rawHit, error) {
-	body, err := json.Marshal(map[string]any{
+func buildKNNBody(query string, vec []float32, k int) ([]byte, error) {
+	titleVec := map[string]any{
+		"vector": vec,
+		"k":      k,
+	}
+	if filter := genderCategoryFilter(query); filter != nil {
+		titleVec["filter"] = filter
+	}
+	return json.Marshal(map[string]any{
 		"size":    k,
 		"_source": sourceFields(),
 		"query": map[string]any{
 			"knn": map[string]any{
-				"title_vec": map[string]any{
-					"vector": vec,
-					"k":      k,
-				},
+				"title_vec": titleVec,
 			},
 		},
 	})
+}
+
+func (e *Engine) knnRaw(ctx context.Context, query string, vec []float32, k int) ([]rawHit, error) {
+	body, err := buildKNNBody(query, vec, k)
 	if err != nil {
 		return nil, err
 	}
@@ -146,6 +180,7 @@ func (e *Engine) BM25(ctx context.Context, query string, k int) ([]Hit, error) {
 			Brand:           r.Source.Brand,
 			Color:           r.Source.Color,
 			Category:        r.Source.Category,
+			CategoryPath:    r.Source.CategoryPath,
 			PriceCents:      r.Source.PriceCents,
 			PopularityPrior: r.Source.PopularityPrior,
 			BM25:            r.Score,
@@ -166,13 +201,13 @@ func (e *Engine) Hybrid(ctx context.Context, query string, vec []float32, candN,
 	}
 
 	var (
-		wg            sync.WaitGroup
-		bm25, knn     []rawHit
+		wg              sync.WaitGroup
+		bm25, knn       []rawHit
 		bm25Err, knnErr error
 	)
 	wg.Add(2)
 	go func() { defer wg.Done(); bm25, bm25Err = e.bm25Raw(ctx, query, candN) }()
-	go func() { defer wg.Done(); knn, knnErr = e.knnRaw(ctx, vec, candN) }()
+	go func() { defer wg.Done(); knn, knnErr = e.knnRaw(ctx, query, vec, candN) }()
 	wg.Wait()
 
 	switch {
@@ -223,6 +258,7 @@ func (e *Engine) Hybrid(ctx context.Context, query string, vec []float32, candN,
 			Brand:           f.src.Brand,
 			Color:           f.src.Color,
 			Category:        f.src.Category,
+			CategoryPath:    f.src.CategoryPath,
 			PriceCents:      f.src.PriceCents,
 			PopularityPrior: f.src.PopularityPrior,
 			BM25:            f.bm25,
@@ -235,6 +271,79 @@ func (e *Engine) Hybrid(ctx context.Context, query string, vec []float32, candN,
 	// Sort by RRF desc.
 	sortHitsByRRF(hits)
 	return hits, nil
+}
+
+func genderCategoryFilter(query string) map[string]any {
+	var category string
+	switch retrievalQueryGenderIntent(query) {
+	case retrievalGenderMen:
+		category = "Men"
+	case retrievalGenderWomen:
+		category = "Women"
+	case retrievalGenderBoys:
+		category = "Boys"
+	case retrievalGenderGirls:
+		category = "Girls"
+	default:
+		return nil
+	}
+	return map[string]any{
+		"term": map[string]any{
+			"category_path.raw": category,
+		},
+	}
+}
+
+func retrievalQueryGenderIntent(query string) int {
+	found := retrievalGenderNone
+	for _, token := range retrievalTokens(query) {
+		g := retrievalGenderToken(token)
+		if g == retrievalGenderNone {
+			continue
+		}
+		if found != retrievalGenderNone && found != g {
+			return retrievalGenderNone
+		}
+		found = g
+	}
+	return found
+}
+
+func retrievalGenderToken(token string) int {
+	switch token {
+	case "men", "mens", "man", "male":
+		return retrievalGenderMen
+	case "women", "womens", "woman", "female":
+		return retrievalGenderWomen
+	case "boys", "boy":
+		return retrievalGenderBoys
+	case "girls", "girl":
+		return retrievalGenderGirls
+	default:
+		return retrievalGenderNone
+	}
+}
+
+func retrievalTokens(s string) []string {
+	if s == "" {
+		return nil
+	}
+	out := make([]string, 0, 8)
+	var sb strings.Builder
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' {
+			sb.WriteRune(unicode.ToLower(r))
+			continue
+		}
+		if sb.Len() > 0 {
+			out = append(out, sb.String())
+			sb.Reset()
+		}
+	}
+	if sb.Len() > 0 {
+		out = append(out, sb.String())
+	}
+	return out
 }
 
 func sortHitsByRRF(h []Hit) {

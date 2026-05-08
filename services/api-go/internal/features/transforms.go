@@ -6,6 +6,14 @@ import (
 	"unicode"
 )
 
+const (
+	GenderNone  = 0.0
+	GenderMen   = 1.0
+	GenderWomen = 2.0
+	GenderBoys  = 3.0
+	GenderGirls = 4.0
+)
+
 // Tokenize splits on Unicode word boundaries (matches Python re.findall(r"\w+")
 // when both sides interpret \w as Unicode word). All tokens are lowercased.
 func Tokenize(s string) []string {
@@ -57,4 +65,64 @@ func QueryHasSizePattern(query string) float64 {
 		return 1
 	}
 	return 0
+}
+
+func QueryGenderIntent(query string) float64 {
+	found := GenderNone
+	for _, t := range Tokenize(query) {
+		g := queryGenderToken(t)
+		if g == GenderNone {
+			continue
+		}
+		if found != GenderNone && found != g {
+			return GenderNone
+		}
+		found = g
+	}
+	return found
+}
+
+func ProductGender(categoryPath []string) float64 {
+	for _, part := range categoryPath {
+		switch strings.ToLower(strings.TrimSpace(part)) {
+		case "men":
+			return GenderMen
+		case "women":
+			return GenderWomen
+		case "boys":
+			return GenderBoys
+		case "girls":
+			return GenderGirls
+		}
+	}
+	return GenderNone
+}
+
+func GenderIntentMatch(queryGender, productGender float64) float64 {
+	if queryGender != GenderNone && queryGender == productGender {
+		return 1
+	}
+	return 0
+}
+
+func GenderIntentMismatch(queryGender, productGender float64) float64 {
+	if queryGender != GenderNone && productGender != GenderNone && queryGender != productGender {
+		return 1
+	}
+	return 0
+}
+
+func queryGenderToken(t string) float64 {
+	switch t {
+	case "men", "mens", "man", "male":
+		return GenderMen
+	case "women", "womens", "woman", "female":
+		return GenderWomen
+	case "boys", "boy":
+		return GenderBoys
+	case "girls", "girl":
+		return GenderGirls
+	default:
+		return GenderNone
+	}
 }

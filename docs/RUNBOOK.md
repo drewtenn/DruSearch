@@ -6,7 +6,7 @@ One-page operational reference: bring-up, retrain loop, common failures.
 
 - Docker (with `docker compose v5+`)
 - ~8 GB free disk for OpenSearch + indices + model artifacts
-- Internet egress to `media.githubusercontent.com` (ESCI parquet download, first run only — afterwards cached in MinIO).
+- Internet egress to Hugging Face for Amazon Reviews 2023 metadata, unless `AMAZON_REVIEWS_META_FILE` points at a local JSONL/JSONL.GZ file.
 
 ## Bring-up (cold start)
 
@@ -15,7 +15,7 @@ cp .env.example .env
 make up                                    # docker compose up -d
 make ready                                 # waits for /readyz to return 200
 
-make seed-catalog                          # ESCI -> Postgres (~30s warm, ~3min cold for parquet download)
+make seed-catalog                          # Amazon Reviews 2023 -> Postgres
 make index-bm25                            # Postgres -> OpenSearch (~30s)
 make embed-vectors                         # title vectors -> OpenSearch (~2min on CPU)
 
