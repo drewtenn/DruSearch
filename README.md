@@ -1,239 +1,112 @@
 # DruSearch
 
-Hybrid e-commerce search service: BM25 + dense embeddings + LightGBM Learning-to-Rank reranker, with click-driven personalization.
+DruSearch is a local-first e-commerce search stack. It combines lexical search, dense retrieval, click/event feedback, and a LightGBM Learning-to-Rank reranker so product results can improve from behavior.
 
-- **Go API** (search, events, admin)
-- **Python embedder sidecar** (sentence-transformers)
-- **Python ML pipelines** (ingest, index, embed, simulate, label, train, evaluate)
-- **OpenSearch** (BM25 + k-NN), **Postgres**, **Redis**, **MLflow**, **MinIO**
+The project is intentionally production-shaped, but runnable on one machine with Docker Compose.
 
-## Quick start
+## Architecture
+
+```mermaid
+flowchart LR
+    Client["Client / curl"] --> API["Go API\n/search /events /products /admin"]
+
+    API --> Embedder["Python embedder\nsentence-transformers"]
+    API --> OpenSearch["OpenSearch\nBM25 + k-NN"]
+    API --> Redis["Redis\nuser features"]
+    API --> Postgres["Postgres\ncatalog + events"]
+
+    Pipelines["Python pipelines"] --> Postgres
+    Pipelines --> OpenSearch
+    Pipelines --> Embedder
+    Pipelines --> MLflow["MLflow\nmodel registry"]
+    Pipelines --> MinIO["MinIO\nartifacts + cached data"]
+    Pipelines --> Redis
+
+    MLflow --> API
+```
+
+Search flow:
+
+1. The API embeds the query with the Python embedder.
+2. OpenSearch retrieves BM25 and vector candidates.
+3. The API fuses candidates with RRF.
+4. The LightGBM reranker optionally reorders candidates.
+5. Impression/click/purchase events feed future training data.
+
+## Quick Start
 
 ```bash
 cp .env.example .env
-make up            # docker compose up -d
-make ready         # wait for /readyz
-
-# Load demo data before calling /search
-make seed-databases # Amazon Reviews 2023 -> Postgres + OpenSearch products_v1
-
-# Optional: add dense vectors for the k-NN side of hybrid retrieval
+make up
+make ready
+make seed-databases
 make embed-vectors
 ```
 
-`make ready` checks that the services are reachable. It does not load the catalog or create the `products_v1` search index; run `make seed-databases` on a fresh stack before using `/search`.
-
-By default, `make seed-catalog` streams 10,000 products from the Amazon Reviews 2023 `Clothing_Shoes_and_Jewelry` metadata file. Set `AMAZON_REVIEWS_CATEGORY`, `AMAZON_REVIEWS_TARGET_PRODUCTS`, `AMAZON_REVIEWS_META_URL`, or `AMAZON_REVIEWS_META_FILE` in `.env` to choose a different category, sample size, mirror URL, or local JSONL/JSONL.GZ file.
-
-## API
-
-The Go API listens on `http://localhost:8080` when started with `make up`. All JSON responses use `Content-Type: application/json` unless noted otherwise.
-
-| Method | Path | Purpose |
-|---|---|---|
-| `GET` | `/healthz` | Process liveness. |
-| `GET` | `/readyz` | Dependency readiness for Postgres, Redis, OpenSearch, and the embedder. |
-| `GET` | `/metrics` | Prometheus metrics. |
-| `GET` | `/search` | Hybrid product search with optional user personalization and LTR reranking. |
-| `POST` | `/events` | Record impression, click, or purchase feedback. |
-| `GET` | `/products/{id}` | Fetch one product by ID. |
-| `POST` | `/admin/reload-model` | Reload the promoted LightGBM model from disk. |
-| `POST` | `/admin/reindex` | Reserved admin endpoint; currently returns `501`. |
-
-### Health and readiness
-
-```bash
-curl -fsS http://localhost:8080/healthz
-curl -fsS http://localhost:8080/readyz
-```
-
-`/readyz` returns `200` only when all dependencies are healthy:
-
-```json
-{
-  "status": "ok",
-  "postgres": true,
-  "redis": true,
-  "opensearch": true,
-  "embedder": true
-}
-```
-
-### Search
-
-Search requires the catalog to be loaded and indexed. On a fresh stack, run `make seed-databases` first; run `make embed-vectors` as well to populate `title_vec` for k-NN scoring.
+Then search:
 
 ```bash
 curl -G http://localhost:8080/search \
   --data-urlencode "q=running shoes" \
-  --data-urlencode "k=5" \
-  --data-urlencode "user_id=user-123" \
-  --data-urlencode "session_id=session-abc"
+  --data-urlencode "k=5"
 ```
 
-Query parameters:
+`make ready` only checks service health. A fresh stack still needs `make seed-databases` before `/search` has products to return.
 
-| Name | Required | Default | Notes |
-|---|---:|---|---|
-| `q` | yes | - | Search text. Blank or missing values return `400`. |
-| `k` | no | `20` | Number of results. Values above `100` are ignored. |
-| `user_id` | no | empty | Enables per-user affinity features when known. |
-| `session_id` | no | generated anonymous ID | Echoed in the response and used for impression events. |
+## Full Demo Loop
 
-Response:
-
-```json
-{
-  "query_id": "7f33c93a6cb94836a97728582ff0aa63",
-  "query": "running shoes",
-  "session_id": "session-abc",
-  "mode": "hybrid+ltr",
-  "model_version": "ltr_reranker",
-  "results": [
-    {
-      "product_id": "B000123",
-      "title": "Trail Running Shoe",
-      "brand": "Acme",
-      "color": "black",
-      "category": "Running",
-      "category_path": ["Men", "Shoes", "Athletic", "Running"],
-      "price_cents": 7999,
-      "score": 2.41,
-      "explain": {
-        "bm25": 8.12,
-        "bm25_rank": 3,
-        "knn": 0.77,
-        "knn_rank": 8,
-        "rrf": 0.028,
-        "ltr": 2.41,
-        "ltr_rank": 1
-      }
-    }
-  ],
-  "took_ms": 37
-}
-```
-
-`mode` is `hybrid`, `hybrid+ltr`, or `bm25`. The API degrades to `bm25` if the embedder is unavailable, and omits `model_version` when no LTR model is loaded.
-
-### Events
-
-`/search` automatically queues impression events for returned results. Use `/events` to send explicit impressions, clicks, or purchases:
+To run the complete local workflow with data, vectors, simulated behavior, feature aggregation, model training, promotion, and API reload:
 
 ```bash
-curl -fsS -X POST http://localhost:8080/events \
-  -H "Content-Type: application/json" \
-  -d '{
-    "event_type": "click",
-    "query_id": "7f33c93a6cb94836a97728582ff0aa63",
-    "query": "running shoes",
-    "session_id": "session-abc",
-    "user_id": "user-123",
-    "product_id": "B000123",
-    "position": 0,
-    "retrieval_scores": {
-      "bm25": 8.12,
-      "knn": 0.77,
-      "rrf": 0.028,
-      "ltr": 2.41
-    },
-    "source": "real"
-  }'
+make bootstrap-search
 ```
 
-Required fields are `event_type`, `query_id`, `query`, `session_id`, and `product_id`. `event_type` must be `impression`, `click`, or `purchase`; `position` must be `0` or greater. Accepted events return:
+After that, `/search` should return `mode` values such as `hybrid+ltr` when the model and vectors are available.
 
-```json
-{"status":"queued"}
-```
+## Common Commands
 
-### Products
+| Command | Purpose |
+|---|---|
+| `make up` | Start the local Docker Compose stack. |
+| `make down` | Stop the stack. |
+| `make ready` | Wait for API dependency readiness. |
+| `make seed-databases` | Load product data into Postgres and OpenSearch. |
+| `make embed-vectors` | Add dense vectors for k-NN retrieval. |
+| `make simulate` | Generate example searches, clicks, and purchases. |
+| `make retrain-model` | Rebuild features, train, promote, and reload the ranker. |
+| `make metrics` | Show DruSearch Prometheus metrics. |
+| `make test-go` | Run Go tests. |
+| `make test-py` | Run Python tests. |
 
-```bash
-curl -fsS http://localhost:8080/products/B000123
-```
+## API
 
-Response:
+The API runs at `http://localhost:8080`.
 
-```json
-{
-  "product_id": "B000123",
-  "title": "Trail Running Shoe",
-  "description": "Lightweight trail shoe.",
-  "bullet_points": "Durable outsole; Breathable upper",
-  "brand": "Acme",
-  "color": "black",
-  "category": "Running",
-  "category_path": ["Men", "Shoes", "Athletic", "Running"],
-  "locale": "us",
-  "price_cents": 7999,
-  "raw_metadata": {
-    "parent_asin": "B000123",
-    "title": "Trail Running Shoe",
-    "price": "79.99",
-    "rating_number": 120
-  }
-}
-```
-
-Unknown products return `404`.
-
-### Admin endpoints
-
-Admin endpoints require a configured `ADMIN_TOKEN` and either `Authorization: Bearer $ADMIN_TOKEN` or `X-Admin-Token: $ADMIN_TOKEN`.
-
-```bash
-ADMIN_TOKEN=$(openssl rand -hex 16)  # add this value to .env, then recreate the api container
-docker compose up -d --force-recreate api
-make reload-model                   # reads ADMIN_TOKEN from your shell or .env
-
-# Equivalent direct API call:
-curl -fsS -X POST http://localhost:8080/admin/reload-model \
-  -H "Authorization: Bearer $ADMIN_TOKEN"
-```
-
-Successful model reloads return:
-
-```json
-{
-  "status": "ok",
-  "path": "/var/lib/drusearch/models/ltr_reranker.txt",
-  "loaded_at": "2026-05-08T12:00:00Z",
-  "meta": {
-    "name": "ltr_reranker",
-    "version": "1"
-  }
-}
-```
-
-If `ADMIN_TOKEN` is unset, `/admin/*` returns `503`.
-
-## Phases
-
-| Phase | Status | Demo |
+| Method | Path | Purpose |
 |---|---|---|
-| 0 — Scaffold + compose | done | `make up && curl localhost:8080/readyz` |
-| 1 — BM25 search | done | `curl 'localhost:8080/search?q=running+shoes'` |
-| 2 — Hybrid retrieval (BM25 + k-NN) | done | NDCG@10 lift on ESCI |
-| 3 — Event ingest + click simulator | done | events in Postgres |
-| 4 — LTR training + offline eval | done | NDCG@10 lift in MLflow |
-| 5 — LTR serving in Go | done | `/admin/reload-model` |
-| 6 — Personalization + retraining loop | done | per-user re-ranking |
-| 7 — Production polish | done | `/metrics`, embedder circuit breaker, runbook, gate-promote, **admin auth, CI, codegen+fixture feature parity** |
+| `GET` | `/healthz` | Process liveness. |
+| `GET` | `/readyz` | Dependency readiness. |
+| `GET` | `/metrics` | Prometheus metrics. |
+| `GET` | `/search?q=...&k=...` | Product search. |
+| `POST` | `/events` | Impression, click, or purchase feedback. |
+| `GET` | `/products/{id}` | Product lookup. |
+| `POST` | `/admin/reload-model` | Reload the promoted LTR model. |
 
-## Feature schema parity
+Admin endpoints require `ADMIN_TOKEN` in `.env`.
 
-`libs/schema/feature_schema.json` is the single source of truth for the 13 LTR features. `libs/schema/codegen.py` generates:
+## Project Layout
 
-- `pipelines/pipelines/features/_generated.py` (Python tuple + per-feature index constants)
-- `services/api-go/internal/features/schema_generated.go` (Go constants + ordered Names)
+| Path | Purpose |
+|---|---|
+| `services/api-go` | Go search API, retrieval, features, reranking, events. |
+| `services/embedder-py` | FastAPI embedding sidecar. |
+| `pipelines` | Ingest, indexing, embedding, simulation, training, evaluation. |
+| `libs/schema` | Shared LTR feature schema and codegen. |
+| `infra` | Local Postgres and OpenSearch setup. |
+| `docs` | Architecture notes, PRD, runbook, implementation plans. |
 
-Both the Python (`pipelines/pipelines/features/__init__.py`) and Go (`services/api-go/internal/features/schema_test.go`) sides assert at import/test time that the hand-written constants match the generated ones. Cross-language transform parity is tested against shared fixtures in `libs/schema/fixtures/interaction_fixtures.json` from both `pipelines/tests/test_interaction_parity.py` and `services/api-go/internal/features/parity_test.go`.
+## More Docs
 
-```bash
-make check-feature-parity   # regen schema files and fail CI on git diff
-make test-go                # Go tests including interaction-feature parity
-make test-py                # Python tests including interaction-feature parity
-```
-
-CI (`.github/workflows/ci.yml`) runs all three on every push and PR.
+- [Architecture](docs/ARCHITECTURE.md)
+- [Runbook](docs/RUNBOOK.md)
+- [Product requirements](docs/PRD.md)

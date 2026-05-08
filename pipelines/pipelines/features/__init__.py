@@ -33,30 +33,34 @@ class FeatureDef:
     description: str
 
 
-# Ordered feature list. Append-only; do not reorder, ever.
-#
-# Phase 6 adds user_brand_affinity (ONLINE_USER). v1 still omits
-# ctr_prior / purchase_rate: they smuggle position bias from the
-# synthetic click stream into a non-IPS-weighted model — Phase 7
-# brings them back with proper IPS correction.
+# Ordered feature list. v3 intentionally replaces the previous schema; rebuild
+# the API, training rows, and model before serving these indices.
 FEATURES: tuple[FeatureDef, ...] = (
-    FeatureDef("bm25_score",            Source.RETRIEVAL,      "BM25 raw score"),
-    FeatureDef("bm25_rank",             Source.RETRIEVAL,      "BM25 rank within query (1-indexed); 0 if not in BM25 set"),
-    FeatureDef("knn_score",             Source.RETRIEVAL,      "k-NN cosine similarity"),
-    FeatureDef("knn_rank",              Source.RETRIEVAL,      "k-NN rank within query (1-indexed); 0 if not in k-NN set"),
-    FeatureDef("rrf_score",             Source.RETRIEVAL,      "RRF fused score"),
-    FeatureDef("popularity_prior",      Source.STATIC_PRODUCT, "Pre-existing popularity prior in [0,1]"),
-    FeatureDef("price_log_cents",       Source.STATIC_PRODUCT, "log1p(price_cents)"),
-    FeatureDef("title_length_tokens",   Source.STATIC_PRODUCT, "Token count of title"),
-    FeatureDef("query_length_tokens",   Source.INTERACTION,    "Token count of query"),
-    FeatureDef("query_has_brand",       Source.INTERACTION,    "Query contains a known brand token (0/1)"),
-    FeatureDef("query_has_color",       Source.INTERACTION,    "Query contains a known color token (0/1)"),
-    FeatureDef("query_has_size_pattern", Source.INTERACTION,   r"Query matches \b\d+(?:\.\d+)?\s?(oz|ml|gb|tb|in|cm|mm|kg|lb)\b (0/1)"),
-    FeatureDef("user_brand_affinity",   Source.ONLINE_USER,    "User's click-share for the candidate's brand in [0,1]; 0 if unknown user"),
-    FeatureDef("query_gender_intent",   Source.INTERACTION,    "Requested gender inferred from query: 0=none, 1=men, 2=women, 3=boys, 4=girls"),
-    FeatureDef("product_gender",        Source.STATIC_PRODUCT, "Product gender inferred from category path: 0=none, 1=men, 2=women, 3=boys, 4=girls"),
-    FeatureDef("gender_intent_match",   Source.INTERACTION,    "1 when query_gender_intent is known and equals product_gender"),
-    FeatureDef("gender_intent_mismatch", Source.INTERACTION,   "1 when query_gender_intent and product_gender are known but differ"),
+    FeatureDef("bm25_score", Source.RETRIEVAL, "BM25 raw score"),
+    FeatureDef("bm25_rank", Source.RETRIEVAL, "BM25 rank within query; 0 if absent"),
+    FeatureDef("knn_score", Source.RETRIEVAL, "k-NN cosine similarity"),
+    FeatureDef("knn_rank", Source.RETRIEVAL, "k-NN rank within query; 0 if absent"),
+    FeatureDef("rrf_score", Source.RETRIEVAL, "RRF fused retrieval score"),
+    FeatureDef("popularity_prior", Source.STATIC_PRODUCT, "Catalog popularity prior in [0,1]"),
+    FeatureDef("price_log_cents", Source.STATIC_PRODUCT, "log1p(price_cents)"),
+    FeatureDef("title_length_tokens", Source.STATIC_PRODUCT, "Token count of title"),
+    FeatureDef("query_length_tokens", Source.INTERACTION, "Token count of query"),
+    FeatureDef("query_has_brand", Source.INTERACTION, "Query contains a known brand token"),
+    FeatureDef("query_has_color", Source.INTERACTION, "Query contains a known color token"),
+    FeatureDef("query_has_category_token", Source.INTERACTION, "Query contains a known category token"),
+    FeatureDef("query_has_size_pattern", Source.INTERACTION, "Query contains size/unit pattern"),
+    FeatureDef("query_gender_intent", Source.INTERACTION, "Requested gender: 0=none, 1=men, 2=women, 3=boys, 4=girls"),
+    FeatureDef("product_gender", Source.STATIC_PRODUCT, "Product gender from category path"),
+    FeatureDef("gender_intent_match", Source.INTERACTION, "Query gender matches product gender"),
+    FeatureDef("gender_intent_mismatch", Source.INTERACTION, "Known query gender differs from product gender"),
+    FeatureDef("product_brand_match", Source.INTERACTION, "Query brand token matches product brand"),
+    FeatureDef("product_brand_token_overlap", Source.INTERACTION, "Fraction of product brand tokens present in query"),
+    FeatureDef("product_color_match", Source.INTERACTION, "Query color token matches product color"),
+    FeatureDef("title_query_token_coverage", Source.INTERACTION, "Fraction of non-brand query tokens present in title"),
+    FeatureDef("category_query_token_coverage", Source.INTERACTION, "Fraction of non-brand query tokens present in category path"),
+    FeatureDef("product_category_token_overlap", Source.INTERACTION, "Fraction of product category tokens present in query"),
+    FeatureDef("title_exact_query_match", Source.INTERACTION, "Normalized full query appears in normalized title"),
+    FeatureDef("user_brand_affinity", Source.ONLINE_USER, "User brand click-share in [0,1]"),
 )
 
 FEATURE_NAMES: tuple[str, ...] = tuple(f.name for f in FEATURES)

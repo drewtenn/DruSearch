@@ -3,6 +3,7 @@ package features
 import (
 	"context"
 	"math"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -11,8 +12,9 @@ import (
 
 // Vocab is the catalog-derived token vocabulary used by interaction features.
 type Vocab struct {
-	Brand map[string]struct{}
-	Color map[string]struct{}
+	Brand    map[string]struct{}
+	Color    map[string]struct{}
+	Category map[string]struct{}
 }
 
 // LoadVocab reads brand and color values from products and tokenizes them
@@ -20,18 +22,20 @@ type Vocab struct {
 // the same source.
 func LoadVocab(ctx context.Context, pool *pgxpool.Pool) (*Vocab, error) {
 	v := &Vocab{
-		Brand: make(map[string]struct{}, 1024),
-		Color: make(map[string]struct{}, 1024),
+		Brand:    make(map[string]struct{}, 1024),
+		Color:    make(map[string]struct{}, 1024),
+		Category: make(map[string]struct{}, 4096),
 	}
 	rows, err := pool.Query(ctx,
-		"SELECT COALESCE(brand,''), COALESCE(color,'') FROM products")
+		"SELECT COALESCE(brand,''), COALESCE(color,''), COALESCE(category_path, ARRAY[]::TEXT[]) FROM products")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var brand, color string
-		if err := rows.Scan(&brand, &color); err != nil {
+		var categoryPath []string
+		if err := rows.Scan(&brand, &color, &categoryPath); err != nil {
 			return nil, err
 		}
 		for _, t := range Tokenize(brand) {
@@ -39,6 +43,11 @@ func LoadVocab(ctx context.Context, pool *pgxpool.Pool) (*Vocab, error) {
 		}
 		for _, t := range Tokenize(color) {
 			v.Color[t] = struct{}{}
+		}
+		for _, part := range categoryPath {
+			for _, t := range Tokenize(part) {
+				v.Category[t] = struct{}{}
+			}
 		}
 	}
 	return v, rows.Err()
@@ -55,9 +64,13 @@ func BuildMatrix(query string, hits []retrieval.Hit, vocab *Vocab, user *UserFea
 	n := len(hits)
 	out := make([]float64, n*NumFeatures)
 
+	if vocab == nil {
+		vocab = &Vocab{}
+	}
 	qLen := QueryLengthTokens(query)
 	qBrand := QueryHasAny(query, vocab.Brand)
 	qColor := QueryHasAny(query, vocab.Color)
+	qCategory := QueryHasAny(query, vocab.Category)
 	qSize := QueryHasSizePattern(query)
 	qGender := QueryGenderIntent(query)
 
@@ -79,12 +92,21 @@ func BuildMatrix(query string, hits []retrieval.Hit, vocab *Vocab, user *UserFea
 		out[off+IdxQueryLengthTokens] = qLen
 		out[off+IdxQueryHasBrand] = qBrand
 		out[off+IdxQueryHasColor] = qColor
+		out[off+IdxQueryHasCategoryToken] = qCategory
 		out[off+IdxQueryHasSizePat] = qSize
 		pGender := ProductGender(h.CategoryPath)
 		out[off+IdxQueryGenderIntent] = qGender
 		out[off+IdxProductGender] = pGender
 		out[off+IdxGenderIntentMatch] = GenderIntentMatch(qGender, pGender)
 		out[off+IdxGenderIntentMis] = GenderIntentMismatch(qGender, pGender)
+		out[off+IdxProductBrandMatch] = ProductBrandMatch(query, h.Brand)
+		out[off+IdxProductBrandTokenOverlap] = ProductBrandTokenOverlap(query, h.Brand)
+		out[off+IdxProductColorMatch] = ProductColorMatch(query, h.Color)
+		categoryText := strings.Join(h.CategoryPath, " ")
+		out[off+IdxTitleQueryTokenCoverage] = QueryTokenCoverage(query, h.Title, vocab.Brand)
+		out[off+IdxCategoryQueryTokenCoverage] = QueryTokenCoverage(query, categoryText, vocab.Brand)
+		out[off+IdxProductCategoryTokenOverlap] = TokenOverlapFraction(query, categoryText)
+		out[off+IdxTitleExactQueryMatch] = ExactQueryPhraseMatch(query, h.Title)
 		if brandAff != nil {
 			out[off+IdxUserBrandAffinity] = brandAff[h.Brand]
 		}

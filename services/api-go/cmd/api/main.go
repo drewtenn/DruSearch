@@ -53,14 +53,22 @@ func main() {
 
 	go bus.Run(rootCtx)
 
-	// Catalog vocab for interaction features (brand/color token sets).
+	// Catalog vocab for interaction features (brand/color/category token sets).
 	vocab, err := features.LoadVocab(rootCtx, stores.PG)
 	if err != nil {
 		logger.Warn("vocab load failed; reranker will not run until /admin/reload-model after products exist",
 			zap.Error(err))
-		vocab = &features.Vocab{Brand: map[string]struct{}{}, Color: map[string]struct{}{}}
+		vocab = &features.Vocab{
+			Brand:    map[string]struct{}{},
+			Color:    map[string]struct{}{},
+			Category: map[string]struct{}{},
+		}
 	} else {
-		logger.Info("vocab loaded", zap.Int("brand_tokens", len(vocab.Brand)), zap.Int("color_tokens", len(vocab.Color)))
+		logger.Info("vocab loaded",
+			zap.Int("brand_tokens", len(vocab.Brand)),
+			zap.Int("color_tokens", len(vocab.Color)),
+			zap.Int("category_tokens", len(vocab.Category)),
+		)
 	}
 
 	// Optional LightGBM reranker; nil-ok if no model is on disk yet.

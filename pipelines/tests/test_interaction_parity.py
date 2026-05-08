@@ -13,10 +13,17 @@ import json
 from pathlib import Path
 
 from pipelines.features.transforms import (
+    exact_query_phrase_match,
     gender_intent_match,
     gender_intent_mismatch,
+    product_brand_match,
+    product_brand_token_overlap,
+    product_color_match,
+    product_category_token_overlap,
     product_gender,
+    query_token_coverage,
     query_has_brand,
+    query_has_category_token,
     query_has_color,
     query_gender_intent,
     query_has_size_pattern,
@@ -42,15 +49,22 @@ def test_fixtures_loadable():
 
 def _vocab():
     data = _load()
+    category_tokens = frozenset(
+        t
+        for case in data["cases"]
+        for part in case.get("category_path", [])
+        for t in tokenize(part)
+    )
     return (
         frozenset(b.lower() for b in data["vocab"]["brands"]),
         frozenset(c.lower() for c in data["vocab"]["colors"]),
+        category_tokens,
     )
 
 
 def test_interaction_parity_fixtures():
     data = _load()
-    brands, colors = _vocab()
+    brands, colors, categories = _vocab()
     failures: list[str] = []
     for case in data["cases"]:
         q = case["query"]
@@ -71,6 +85,10 @@ def test_interaction_parity_fixtures():
         got_qhc = query_has_color(q, colors)
         if got_qhc != exp["query_has_color"]:
             failures.append(f"{case['name']}: query_has_color({q!r}) = {got_qhc}, want {exp['query_has_color']}")
+
+        got_qhcat = query_has_category_token(q, categories)
+        if got_qhcat != exp["query_has_category_token"]:
+            failures.append(f"{case['name']}: query_has_category_token({q!r}) = {got_qhcat}, want {exp['query_has_category_token']}")
 
         got_qhs = query_has_size_pattern(q)
         if got_qhs != exp["query_has_size_pattern"]:
@@ -93,6 +111,38 @@ def test_interaction_parity_fixtures():
         if got_gix != exp["gender_intent_mismatch"]:
             failures.append(f"{case['name']}: gender_intent_mismatch({got_qgi}, {got_pg}) = {got_gix}, want {exp['gender_intent_mismatch']}")
 
+        product_brand = case.get("product_brand", "")
+        got_pbm = product_brand_match(q, product_brand)
+        if got_pbm != exp["product_brand_match"]:
+            failures.append(f"{case['name']}: product_brand_match({q!r}, {product_brand!r}) = {got_pbm}, want {exp['product_brand_match']}")
+
+        got_pbto = product_brand_token_overlap(q, product_brand)
+        if got_pbto != exp["product_brand_token_overlap"]:
+            failures.append(f"{case['name']}: product_brand_token_overlap({q!r}, {product_brand!r}) = {got_pbto}, want {exp['product_brand_token_overlap']}")
+
+        product_color = case.get("product_color", "")
+        got_pcm = product_color_match(q, product_color)
+        if got_pcm != exp["product_color_match"]:
+            failures.append(f"{case['name']}: product_color_match({q!r}, {product_color!r}) = {got_pcm}, want {exp['product_color_match']}")
+
+        product_title = case.get("product_title", "")
+        got_tqtc = query_token_coverage(q, product_title, brands)
+        if got_tqtc != exp["title_query_token_coverage"]:
+            failures.append(f"{case['name']}: title_query_token_coverage({q!r}, {product_title!r}) = {got_tqtc}, want {exp['title_query_token_coverage']}")
+
+        category_text = " ".join(category_path or [])
+        got_cqtc = query_token_coverage(q, category_text, brands)
+        if got_cqtc != exp["category_query_token_coverage"]:
+            failures.append(f"{case['name']}: category_query_token_coverage({q!r}, {category_text!r}) = {got_cqtc}, want {exp['category_query_token_coverage']}")
+
+        got_pcto = product_category_token_overlap(q, category_text)
+        if got_pcto != exp["product_category_token_overlap"]:
+            failures.append(f"{case['name']}: product_category_token_overlap({q!r}, {category_text!r}) = {got_pcto}, want {exp['product_category_token_overlap']}")
+
+        got_teqm = exact_query_phrase_match(q, product_title)
+        if got_teqm != exp["title_exact_query_match"]:
+            failures.append(f"{case['name']}: title_exact_query_match({q!r}, {product_title!r}) = {got_teqm}, want {exp['title_exact_query_match']}")
+
     assert not failures, "interaction-feature parity drift:\n  " + "\n  ".join(failures)
 
 
@@ -105,4 +155,4 @@ def test_schema_matches_generated():
         f"FEATURE_NAMES drift: {FEATURE_NAMES} vs {gen.FEATURE_NAMES}"
     )
     assert NUM_FEATURES == gen.NUM_FEATURES
-    assert gen.SCHEMA_VERSION == "v2"
+    assert gen.SCHEMA_VERSION == "v3"

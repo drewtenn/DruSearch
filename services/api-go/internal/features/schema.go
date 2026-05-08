@@ -9,25 +9,33 @@
 package features
 
 const (
-	IdxBM25Score         = 0
-	IdxBM25Rank          = 1
-	IdxKNNScore          = 2
-	IdxKNNRank           = 3
-	IdxRRFScore          = 4
-	IdxPopularityPrior   = 5
-	IdxPriceLogCents     = 6
-	IdxTitleLengthTokens = 7
-	IdxQueryLengthTokens = 8
-	IdxQueryHasBrand     = 9
-	IdxQueryHasColor     = 10
-	IdxQueryHasSizePat   = 11
-	IdxUserBrandAffinity = 12
-	IdxQueryGenderIntent = 13
-	IdxProductGender     = 14
-	IdxGenderIntentMatch = 15
-	IdxGenderIntentMis   = 16
+	IdxBM25Score                   = 0
+	IdxBM25Rank                    = 1
+	IdxKNNScore                    = 2
+	IdxKNNRank                     = 3
+	IdxRRFScore                    = 4
+	IdxPopularityPrior             = 5
+	IdxPriceLogCents               = 6
+	IdxTitleLengthTokens           = 7
+	IdxQueryLengthTokens           = 8
+	IdxQueryHasBrand               = 9
+	IdxQueryHasColor               = 10
+	IdxQueryHasCategoryToken       = 11
+	IdxQueryHasSizePat             = 12
+	IdxQueryGenderIntent           = 13
+	IdxProductGender               = 14
+	IdxGenderIntentMatch           = 15
+	IdxGenderIntentMis             = 16
+	IdxProductBrandMatch           = 17
+	IdxProductBrandTokenOverlap    = 18
+	IdxProductColorMatch           = 19
+	IdxTitleQueryTokenCoverage     = 20
+	IdxCategoryQueryTokenCoverage  = 21
+	IdxProductCategoryTokenOverlap = 22
+	IdxTitleExactQueryMatch        = 23
+	IdxUserBrandAffinity           = 24
 
-	NumFeatures = 17
+	NumFeatures = 25
 )
 
 // Names ordered by their feature index above.
@@ -43,10 +51,18 @@ var Names = [...]string{
 	"query_length_tokens",
 	"query_has_brand",
 	"query_has_color",
+	"query_has_category_token",
 	"query_has_size_pattern",
-	"user_brand_affinity",
 	"query_gender_intent",
 	"product_gender",
 	"gender_intent_match",
 	"gender_intent_mismatch",
+	"product_brand_match",
+	"product_brand_token_overlap",
+	"product_color_match",
+	"title_query_token_coverage",
+	"category_query_token_coverage",
+	"product_category_token_overlap",
+	"title_exact_query_match",
+	"user_brand_affinity",
 }

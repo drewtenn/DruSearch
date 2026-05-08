@@ -171,10 +171,19 @@ def main() -> int:
         t for c in products["color"].dropna().unique()
         if isinstance(c, str) for t in tf.tokenize(c)
     )
+    category_token_set = frozenset(
+        t
+        for cp in products["category_path"].dropna()
+        for part in (cp or [])
+        for t in tf.tokenize(part)
+    )
 
     df["query_length_tokens"]    = df["query"].apply(tf.query_length_tokens)
     df["query_has_brand"]        = df["query"].apply(lambda q: tf.query_has_brand(q, brand_token_set))
     df["query_has_color"]        = df["query"].apply(lambda q: tf.query_has_color(q, color_token_set))
+    df["query_has_category_token"] = df["query"].apply(
+        lambda q: tf.query_has_category_token(q, category_token_set)
+    )
     df["query_has_size_pattern"] = df["query"].apply(tf.query_has_size_pattern)
     df["query_gender_intent"]    = df["query"].apply(tf.query_gender_intent)
     df["product_gender"]         = df["category_path"].apply(tf.product_gender)
@@ -185,6 +194,30 @@ def main() -> int:
     df["gender_intent_mismatch"] = [
         tf.gender_intent_mismatch(qg, pg)
         for qg, pg in zip(df["query_gender_intent"], df["product_gender"])
+    ]
+    df["product_brand_match"] = [
+        tf.product_brand_match(q, b) for q, b in zip(df["query"], df["brand"])
+    ]
+    df["product_brand_token_overlap"] = [
+        tf.product_brand_token_overlap(q, b) for q, b in zip(df["query"], df["brand"])
+    ]
+    df["product_color_match"] = [
+        tf.product_color_match(q, c) for q, c in zip(df["query"], df["color"])
+    ]
+    df["title_query_token_coverage"] = [
+        tf.query_token_coverage(q, t, brand_token_set)
+        for q, t in zip(df["query"], df["title"])
+    ]
+    df["category_query_token_coverage"] = [
+        tf.query_token_coverage(q, " ".join(cp or []), brand_token_set)
+        for q, cp in zip(df["query"], df["category_path"])
+    ]
+    df["product_category_token_overlap"] = [
+        tf.token_overlap_fraction(q, " ".join(cp or []))
+        for q, cp in zip(df["query"], df["category_path"])
+    ]
+    df["title_exact_query_match"] = [
+        tf.exact_query_phrase_match(q, t) for q, t in zip(df["query"], df["title"])
     ]
 
     # Mask a deterministic fraction of (query_id, user_id) pairs to '' so

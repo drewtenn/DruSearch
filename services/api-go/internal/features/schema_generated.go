@@ -3,7 +3,7 @@
 
 package features
 
-const SchemaVersion = "v2"
+const SchemaVersion = "v3"
 
 const (
 	GenBm25Score = 0
@@ -17,14 +17,22 @@ const (
 	GenQueryLengthTokens = 8
 	GenQueryHasBrand = 9
 	GenQueryHasColor = 10
-	GenQueryHasSizePattern = 11
-	GenUserBrandAffinity = 12
+	GenQueryHasCategoryToken = 11
+	GenQueryHasSizePattern = 12
 	GenQueryGenderIntent = 13
 	GenProductGender = 14
 	GenGenderIntentMatch = 15
 	GenGenderIntentMismatch = 16
+	GenProductBrandMatch = 17
+	GenProductBrandTokenOverlap = 18
+	GenProductColorMatch = 19
+	GenTitleQueryTokenCoverage = 20
+	GenCategoryQueryTokenCoverage = 21
+	GenProductCategoryTokenOverlap = 22
+	GenTitleExactQueryMatch = 23
+	GenUserBrandAffinity = 24
 
-	GenNumFeatures = 17
+	GenNumFeatures = 25
 )
 
 // GenNames is the ordered feature-name list aligned with the indices above.
@@ -40,10 +48,18 @@ var GenNames = [...]string{
 	"query_length_tokens",
 	"query_has_brand",
 	"query_has_color",
+	"query_has_category_token",
 	"query_has_size_pattern",
-	"user_brand_affinity",
 	"query_gender_intent",
 	"product_gender",
 	"gender_intent_match",
 	"gender_intent_mismatch",
+	"product_brand_match",
+	"product_brand_token_overlap",
+	"product_color_match",
+	"title_query_token_coverage",
+	"category_query_token_coverage",
+	"product_category_token_overlap",
+	"title_exact_query_match",
+	"user_brand_affinity",
 }

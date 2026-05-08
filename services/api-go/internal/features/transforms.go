@@ -112,6 +112,91 @@ func GenderIntentMismatch(queryGender, productGender float64) float64 {
 	return 0
 }
 
+func ProductBrandMatch(query, brand string) float64 {
+	queryTokens := tokenSet(Tokenize(query))
+	brandTokens := tokenSet(Tokenize(brand))
+	for t := range brandTokens {
+		if _, ok := queryTokens[t]; ok {
+			return 1
+		}
+	}
+	return 0
+}
+
+func ProductBrandTokenOverlap(query, brand string) float64 {
+	queryTokens := tokenSet(Tokenize(query))
+	brandTokens := tokenSet(Tokenize(brand))
+	if len(brandTokens) == 0 {
+		return 0
+	}
+	matched := 0
+	for t := range brandTokens {
+		if _, ok := queryTokens[t]; ok {
+			matched++
+		}
+	}
+	return float64(matched) / float64(len(brandTokens))
+}
+
+func ProductColorMatch(query, color string) float64 {
+	return ProductBrandMatch(query, color)
+}
+
+func QueryTokenCoverage(query, text string, ignored map[string]struct{}) float64 {
+	queryTokens := Tokenize(query)
+	if len(queryTokens) == 0 {
+		return 0
+	}
+	textTokens := tokenSet(Tokenize(text))
+	kept := 0
+	matched := 0
+	for _, t := range queryTokens {
+		if _, skip := ignored[t]; skip {
+			continue
+		}
+		kept++
+		if _, ok := textTokens[t]; ok {
+			matched++
+		}
+	}
+	if kept == 0 {
+		return 0
+	}
+	return float64(matched) / float64(kept)
+}
+
+func ExactQueryPhraseMatch(query, text string) float64 {
+	q := strings.Join(Tokenize(query), " ")
+	haystack := strings.Join(Tokenize(text), " ")
+	if q != "" && strings.Contains(haystack, q) {
+		return 1
+	}
+	return 0
+}
+
+func TokenOverlapFraction(query, text string) float64 {
+	queryTokens := tokenSet(Tokenize(query))
+	textTokens := tokenSet(Tokenize(text))
+	if len(textTokens) == 0 {
+		return 0
+	}
+	matched := 0
+	for t := range textTokens {
+		if _, ok := queryTokens[t]; ok {
+			matched++
+		}
+	}
+	return float64(matched) / float64(len(textTokens))
+}
+
+func tokenSet(tokens []string) map[string]struct{} {
+	out := make(map[string]struct{}, len(tokens))
+	for _, t := range tokens {
+		out[t] = struct{}{}
+	}
+	return out
+}
+
 func queryGenderToken(t string) float64 {
 	switch t {
 	case "men", "mens", "man", "male":

@@ -140,9 +140,11 @@ refresh-user-features: ## Summarize each user's clicked brands into Redis
 	$(COMPOSE) --profile jobs run --rm pipelines python -m pipelines.features.user_aggs
 
 ##@ Phase 7 — observe the system and promote models safely
-.PHONY: gate-promote metrics
+.PHONY: gate-promote metrics search-quality-smoke
 gate-promote: ## Promote a model only if evaluation says it did not get worse
 	$(COMPOSE) --profile jobs run --rm -e LTR_MODEL_STAGE= pipelines python -m pipelines.register.gate
+search-quality-smoke: ## Run deterministic API relevance smoke checks
+	$(COMPOSE) --profile jobs run --rm pipelines python -m pipelines.evaluate.search_quality_smoke
 metrics: ## Show API counters, timings, and model health signals
 	@curl -s http://localhost:8080/metrics | grep -E '^drusearch_'
 

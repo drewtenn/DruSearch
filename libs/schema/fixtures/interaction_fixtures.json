@@ -13,11 +13,19 @@
         "query_length_tokens":   0.0,
         "query_has_brand":       0.0,
         "query_has_color":       0.0,
+        "query_has_category_token": 0.0,
         "query_has_size_pattern": 0.0,
         "query_gender_intent":    0.0,
         "product_gender":         0.0,
         "gender_intent_match":    0.0,
-        "gender_intent_mismatch": 0.0
+        "gender_intent_mismatch": 0.0,
+        "product_brand_match": 0.0,
+        "product_brand_token_overlap": 0.0,
+        "product_color_match": 0.0,
+        "title_query_token_coverage": 0.0,
+        "category_query_token_coverage": 0.0,
+        "product_category_token_overlap": 0.0,
+        "title_exact_query_match": 0.0
       }
     },
     {
@@ -29,11 +37,19 @@
         "query_length_tokens":   3.0,
         "query_has_brand":       0.0,
         "query_has_color":       0.0,
+        "query_has_category_token": 1.0,
         "query_has_size_pattern": 0.0,
         "query_gender_intent":    1.0,
         "product_gender":         1.0,
         "gender_intent_match":    1.0,
-        "gender_intent_mismatch": 0.0
+        "gender_intent_mismatch": 0.0,
+        "product_brand_match": 0.0,
+        "product_brand_token_overlap": 0.0,
+        "product_color_match": 0.0,
+        "title_query_token_coverage": 0.0,
+        "category_query_token_coverage": 0.3333333333333333,
+        "product_category_token_overlap": 0.2,
+        "title_exact_query_match": 0.0
       }
     },
     {
@@ -45,11 +61,19 @@
         "query_length_tokens":   5.0,
         "query_has_brand":       1.0,
         "query_has_color":       0.0,
+        "query_has_category_token": 1.0,
         "query_has_size_pattern": 0.0,
         "query_gender_intent":    1.0,
         "product_gender":         2.0,
         "gender_intent_match":    0.0,
-        "gender_intent_mismatch": 1.0
+        "gender_intent_mismatch": 1.0,
+        "product_brand_match": 0.0,
+        "product_brand_token_overlap": 0.0,
+        "product_color_match": 0.0,
+        "title_query_token_coverage": 0.0,
+        "category_query_token_coverage": 0.5,
+        "product_category_token_overlap": 0.3333333333333333,
+        "title_exact_query_match": 0.0
       }
     },
     {
@@ -61,11 +85,19 @@
         "query_length_tokens":   4.0,
         "query_has_brand":       1.0,
         "query_has_color":       0.0,
+        "query_has_category_token": 1.0,
         "query_has_size_pattern": 0.0,
         "query_gender_intent":    2.0,
         "product_gender":         2.0,
         "gender_intent_match":    1.0,
-        "gender_intent_mismatch": 0.0
+        "gender_intent_mismatch": 0.0,
+        "product_brand_match": 0.0,
+        "product_brand_token_overlap": 0.0,
+        "product_color_match": 0.0,
+        "title_query_token_coverage": 0.0,
+        "category_query_token_coverage": 0.6666666666666666,
+        "product_category_token_overlap": 0.3333333333333333,
+        "title_exact_query_match": 0.0
       }
     },
     {
@@ -77,11 +109,19 @@
         "query_length_tokens":   3.0,
         "query_has_brand":       0.0,
         "query_has_color":       0.0,
+        "query_has_category_token": 0.0,
         "query_has_size_pattern": 0.0,
         "query_gender_intent":    3.0,
         "product_gender":         4.0,
         "gender_intent_match":    0.0,
-        "gender_intent_mismatch": 1.0
+        "gender_intent_mismatch": 1.0,
+        "product_brand_match": 0.0,
+        "product_brand_token_overlap": 0.0,
+        "product_color_match": 0.0,
+        "title_query_token_coverage": 0.0,
+        "category_query_token_coverage": 0.0,
+        "product_category_token_overlap": 0.0,
+        "title_exact_query_match": 0.0
       }
     },
     {
@@ -92,11 +132,19 @@
         "query_length_tokens":   3.0,
         "query_has_brand":       1.0,
         "query_has_color":       0.0,
+        "query_has_category_token": 0.0,
         "query_has_size_pattern": 0.0,
         "query_gender_intent":    0.0,
         "product_gender":         0.0,
         "gender_intent_match":    0.0,
-        "gender_intent_mismatch": 0.0
+        "gender_intent_mismatch": 0.0,
+        "product_brand_match": 0.0,
+        "product_brand_token_overlap": 0.0,
+        "product_color_match": 0.0,
+        "title_query_token_coverage": 0.0,
+        "category_query_token_coverage": 0.0,
+        "product_category_token_overlap": 0.0,
+        "title_exact_query_match": 0.0
       }
     },
     {
@@ -107,11 +155,19 @@
         "query_length_tokens":   4.0,
         "query_has_brand":       0.0,
         "query_has_color":       1.0,
+        "query_has_category_token": 0.0,
         "query_has_size_pattern": 0.0,
         "query_gender_intent":    0.0,
         "product_gender":         0.0,
         "gender_intent_match":    0.0,
-        "gender_intent_mismatch": 0.0
+        "gender_intent_mismatch": 0.0,
+        "product_brand_match": 0.0,
+        "product_brand_token_overlap": 0.0,
+        "product_color_match": 0.0,
+        "title_query_token_coverage": 0.0,
+        "category_query_token_coverage": 0.0,
+        "product_category_token_overlap": 0.0,
+        "title_exact_query_match": 0.0
       }
     },
     {
@@ -122,11 +178,19 @@
         "query_length_tokens":   4.0,
         "query_has_brand":       1.0,
         "query_has_color":       0.0,
+        "query_has_category_token": 0.0,
         "query_has_size_pattern": 1.0,
         "query_gender_intent":    0.0,
         "product_gender":         0.0,
         "gender_intent_match":    0.0,
-        "gender_intent_mismatch": 0.0
+        "gender_intent_mismatch": 0.0,
+        "product_brand_match": 0.0,
+        "product_brand_token_overlap": 0.0,
+        "product_color_match": 0.0,
+        "title_query_token_coverage": 0.0,
+        "category_query_token_coverage": 0.0,
+        "product_category_token_overlap": 0.0,
+        "title_exact_query_match": 0.0
       }
     },
     {
@@ -137,11 +201,19 @@
         "query_length_tokens":   2.0,
         "query_has_brand":       0.0,
         "query_has_color":       0.0,
+        "query_has_category_token": 0.0,
         "query_has_size_pattern": 1.0,
         "query_gender_intent":    0.0,
         "product_gender":         0.0,
         "gender_intent_match":    0.0,
-        "gender_intent_mismatch": 0.0
+        "gender_intent_mismatch": 0.0,
+        "product_brand_match": 0.0,
+        "product_brand_token_overlap": 0.0,
+        "product_color_match": 0.0,
+        "title_query_token_coverage": 0.0,
+        "category_query_token_coverage": 0.0,
+        "product_category_token_overlap": 0.0,
+        "title_exact_query_match": 0.0
       }
     },
     {
@@ -152,11 +224,19 @@
         "query_length_tokens":   3.0,
         "query_has_brand":       0.0,
         "query_has_color":       0.0,
+        "query_has_category_token": 0.0,
         "query_has_size_pattern": 1.0,
         "query_gender_intent":    0.0,
         "product_gender":         0.0,
         "gender_intent_match":    0.0,
-        "gender_intent_mismatch": 0.0
+        "gender_intent_mismatch": 0.0,
+        "product_brand_match": 0.0,
+        "product_brand_token_overlap": 0.0,
+        "product_color_match": 0.0,
+        "title_query_token_coverage": 0.0,
+        "category_query_token_coverage": 0.0,
+        "product_category_token_overlap": 0.0,
+        "title_exact_query_match": 0.0
       }
     },
     {
@@ -167,11 +247,19 @@
         "query_length_tokens":   3.0,
         "query_has_brand":       0.0,
         "query_has_color":       0.0,
+        "query_has_category_token": 0.0,
         "query_has_size_pattern": 0.0,
         "query_gender_intent":    0.0,
         "product_gender":         0.0,
         "gender_intent_match":    0.0,
-        "gender_intent_mismatch": 0.0
+        "gender_intent_mismatch": 0.0,
+        "product_brand_match": 0.0,
+        "product_brand_token_overlap": 0.0,
+        "product_color_match": 0.0,
+        "title_query_token_coverage": 0.0,
+        "category_query_token_coverage": 0.0,
+        "product_category_token_overlap": 0.0,
+        "title_exact_query_match": 0.0
       }
     },
     {
@@ -182,11 +270,19 @@
         "query_length_tokens":   5.0,
         "query_has_brand":       1.0,
         "query_has_color":       1.0,
+        "query_has_category_token": 0.0,
         "query_has_size_pattern": 1.0,
         "query_gender_intent":    0.0,
         "product_gender":         0.0,
         "gender_intent_match":    0.0,
-        "gender_intent_mismatch": 0.0
+        "gender_intent_mismatch": 0.0,
+        "product_brand_match": 0.0,
+        "product_brand_token_overlap": 0.0,
+        "product_color_match": 0.0,
+        "title_query_token_coverage": 0.0,
+        "category_query_token_coverage": 0.0,
+        "product_category_token_overlap": 0.0,
+        "title_exact_query_match": 0.0
       }
     },
     {
@@ -197,11 +293,97 @@
         "query_length_tokens":   2.0,
         "query_has_brand":       0.0,
         "query_has_color":       0.0,
+        "query_has_category_token": 0.0,
         "query_has_size_pattern": 0.0,
         "query_gender_intent":    0.0,
         "product_gender":         0.0,
         "gender_intent_match":    0.0,
-        "gender_intent_mismatch": 0.0
+        "gender_intent_mismatch": 0.0,
+        "product_brand_match": 0.0,
+        "product_brand_token_overlap": 0.0,
+        "product_color_match": 0.0,
+        "title_query_token_coverage": 0.0,
+        "category_query_token_coverage": 0.0,
+        "product_category_token_overlap": 0.0,
+        "title_exact_query_match": 0.0
+      }
+    },
+    {
+      "name": "brand_match_nike",
+      "query": "nike mens running shoes",
+      "product_brand": "Nike",
+      "category_path": ["Clothing, Shoes & Jewelry", "Men", "Shoes", "Athletic", "Running"],
+      "expected": {
+        "tokenize": ["nike", "mens", "running", "shoes"],
+        "query_length_tokens": 4.0,
+        "query_has_brand": 1.0,
+        "query_has_color": 0.0,
+        "query_has_category_token": 1.0,
+        "query_has_size_pattern": 0.0,
+        "query_gender_intent": 1.0,
+        "product_gender": 1.0,
+        "gender_intent_match": 1.0,
+        "gender_intent_mismatch": 0.0,
+        "product_brand_match": 1.0,
+        "product_brand_token_overlap": 1.0,
+        "product_color_match": 0.0,
+        "title_query_token_coverage": 0.0,
+        "category_query_token_coverage": 0.6666666666666666,
+        "product_category_token_overlap": 0.3333333333333333,
+        "title_exact_query_match": 0.0
+      }
+    },
+    {
+      "name": "title_and_category_coverage",
+      "query": "nike trail running shoes",
+      "product_brand": "Nike",
+      "product_title": "Nike Wildhorse Trail Running Shoes",
+      "category_path": ["Clothing, Shoes & Jewelry", "Men", "Shoes", "Athletic", "Running", "Trail Running"],
+      "expected": {
+        "tokenize": ["nike", "trail", "running", "shoes"],
+        "query_length_tokens": 4.0,
+        "query_has_brand": 1.0,
+        "query_has_color": 0.0,
+        "query_has_category_token": 1.0,
+        "query_has_size_pattern": 0.0,
+        "query_gender_intent": 0.0,
+        "product_gender": 1.0,
+        "gender_intent_match": 0.0,
+        "gender_intent_mismatch": 0.0,
+        "product_brand_match": 1.0,
+        "product_brand_token_overlap": 1.0,
+        "product_color_match": 0.0,
+        "title_query_token_coverage": 1.0,
+        "category_query_token_coverage": 1.0,
+        "product_category_token_overlap": 0.42857142857142855,
+        "title_exact_query_match": 0.0
+      }
+    },
+    {
+      "name": "color_and_exact_title",
+      "query": "red adidas sneakers",
+      "product_brand": "Adidas",
+      "product_color": "Red",
+      "product_title": "Red Adidas Sneakers",
+      "category_path": ["Clothing, Shoes & Jewelry", "Women", "Shoes", "Sneakers"],
+      "expected": {
+        "tokenize": ["red", "adidas", "sneakers"],
+        "query_length_tokens": 3.0,
+        "query_has_brand": 1.0,
+        "query_has_color": 1.0,
+        "query_has_category_token": 1.0,
+        "query_has_size_pattern": 0.0,
+        "query_gender_intent": 0.0,
+        "product_gender": 2.0,
+        "gender_intent_match": 0.0,
+        "gender_intent_mismatch": 0.0,
+        "product_brand_match": 1.0,
+        "product_brand_token_overlap": 1.0,
+        "product_color_match": 1.0,
+        "title_query_token_coverage": 1.0,
+        "category_query_token_coverage": 0.5,
+        "product_category_token_overlap": 0.2,
+        "title_exact_query_match": 1.0
       }
     }
   ]

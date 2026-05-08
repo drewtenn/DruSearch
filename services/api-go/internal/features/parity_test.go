@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -33,20 +34,31 @@ type fixtureFile struct {
 type fixtureCase struct {
 	Name         string         `json:"name"`
 	Query        string         `json:"query"`
+	ProductBrand string         `json:"product_brand"`
+	ProductColor string         `json:"product_color"`
+	ProductTitle string         `json:"product_title"`
 	CategoryPath []string       `json:"category_path"`
 	Expected     fixtureExpects `json:"expected"`
 }
 
 type fixtureExpects struct {
-	Tokenize             []string `json:"tokenize"`
-	QueryLengthTokens    float64  `json:"query_length_tokens"`
-	QueryHasBrand        float64  `json:"query_has_brand"`
-	QueryHasColor        float64  `json:"query_has_color"`
-	QueryHasSizePattern  float64  `json:"query_has_size_pattern"`
-	QueryGenderIntent    float64  `json:"query_gender_intent"`
-	ProductGender        float64  `json:"product_gender"`
-	GenderIntentMatch    float64  `json:"gender_intent_match"`
-	GenderIntentMismatch float64  `json:"gender_intent_mismatch"`
+	Tokenize               []string `json:"tokenize"`
+	QueryLengthTokens      float64  `json:"query_length_tokens"`
+	QueryHasBrand          float64  `json:"query_has_brand"`
+	QueryHasColor          float64  `json:"query_has_color"`
+	QueryHasCategory       float64  `json:"query_has_category_token"`
+	QueryHasSizePattern    float64  `json:"query_has_size_pattern"`
+	QueryGenderIntent      float64  `json:"query_gender_intent"`
+	ProductGender          float64  `json:"product_gender"`
+	GenderIntentMatch      float64  `json:"gender_intent_match"`
+	GenderIntentMismatch   float64  `json:"gender_intent_mismatch"`
+	ProductBrandMatch      float64  `json:"product_brand_match"`
+	ProductBrandOverlap    float64  `json:"product_brand_token_overlap"`
+	ProductColorMatch      float64  `json:"product_color_match"`
+	TitleQueryCoverage     float64  `json:"title_query_token_coverage"`
+	CategoryQueryCoverage  float64  `json:"category_query_token_coverage"`
+	ProductCategoryOverlap float64  `json:"product_category_token_overlap"`
+	TitleExactQueryMatch   float64  `json:"title_exact_query_match"`
 }
 
 // TestInteractionParityFixtures runs the Go reference transforms against the
@@ -67,6 +79,7 @@ func TestInteractionParityFixtures(t *testing.T) {
 	}
 	brands := setLower(ff.Vocab.Brands)
 	colors := setLower(ff.Vocab.Colors)
+	categories := categoryTokens(ff.Cases)
 
 	for _, c := range ff.Cases {
 		c := c
@@ -85,6 +98,9 @@ func TestInteractionParityFixtures(t *testing.T) {
 			if v := QueryHasAny(c.Query, colors); v != c.Expected.QueryHasColor {
 				t.Errorf("QueryHasAny[color](%q) = %v, want %v", c.Query, v, c.Expected.QueryHasColor)
 			}
+			if v := QueryHasAny(c.Query, categories); v != c.Expected.QueryHasCategory {
+				t.Errorf("QueryHasAny[category](%q) = %v, want %v", c.Query, v, c.Expected.QueryHasCategory)
+			}
 			if v := QueryHasSizePattern(c.Query); v != c.Expected.QueryHasSizePattern {
 				t.Errorf("QueryHasSizePattern(%q) = %v, want %v", c.Query, v, c.Expected.QueryHasSizePattern)
 			}
@@ -102,6 +118,28 @@ func TestInteractionParityFixtures(t *testing.T) {
 			if v := GenderIntentMismatch(qg, pg); v != c.Expected.GenderIntentMismatch {
 				t.Errorf("GenderIntentMismatch(%v, %v) = %v, want %v", qg, pg, v, c.Expected.GenderIntentMismatch)
 			}
+			if v := ProductBrandMatch(c.Query, c.ProductBrand); v != c.Expected.ProductBrandMatch {
+				t.Errorf("ProductBrandMatch(%q, %q) = %v, want %v", c.Query, c.ProductBrand, v, c.Expected.ProductBrandMatch)
+			}
+			if v := ProductBrandTokenOverlap(c.Query, c.ProductBrand); v != c.Expected.ProductBrandOverlap {
+				t.Errorf("ProductBrandTokenOverlap(%q, %q) = %v, want %v", c.Query, c.ProductBrand, v, c.Expected.ProductBrandOverlap)
+			}
+			if v := ProductColorMatch(c.Query, c.ProductColor); v != c.Expected.ProductColorMatch {
+				t.Errorf("ProductColorMatch(%q, %q) = %v, want %v", c.Query, c.ProductColor, v, c.Expected.ProductColorMatch)
+			}
+			categoryText := strings.Join(c.CategoryPath, " ")
+			if v := QueryTokenCoverage(c.Query, c.ProductTitle, brands); v != c.Expected.TitleQueryCoverage {
+				t.Errorf("QueryTokenCoverage[title](%q, %q) = %v, want %v", c.Query, c.ProductTitle, v, c.Expected.TitleQueryCoverage)
+			}
+			if v := QueryTokenCoverage(c.Query, categoryText, brands); v != c.Expected.CategoryQueryCoverage {
+				t.Errorf("QueryTokenCoverage[category](%q, %q) = %v, want %v", c.Query, categoryText, v, c.Expected.CategoryQueryCoverage)
+			}
+			if v := TokenOverlapFraction(c.Query, categoryText); v != c.Expected.ProductCategoryOverlap {
+				t.Errorf("TokenOverlapFraction(%q, %q) = %v, want %v", c.Query, categoryText, v, c.Expected.ProductCategoryOverlap)
+			}
+			if v := ExactQueryPhraseMatch(c.Query, c.ProductTitle); v != c.Expected.TitleExactQueryMatch {
+				t.Errorf("ExactQueryPhraseMatch(%q, %q) = %v, want %v", c.Query, c.ProductTitle, v, c.Expected.TitleExactQueryMatch)
+			}
 		})
 	}
 }
@@ -110,6 +148,18 @@ func setLower(xs []string) map[string]struct{} {
 	m := make(map[string]struct{}, len(xs))
 	for _, x := range xs {
 		m[x] = struct{}{}
+	}
+	return m
+}
+
+func categoryTokens(cases []fixtureCase) map[string]struct{} {
+	m := make(map[string]struct{})
+	for _, c := range cases {
+		for _, part := range c.CategoryPath {
+			for _, t := range Tokenize(part) {
+				m[t] = struct{}{}
+			}
+		}
 	}
 	return m
 }

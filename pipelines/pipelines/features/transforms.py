@@ -64,6 +64,10 @@ def query_has_color(query: str | None, known_colors_lower: frozenset[str]) -> fl
     return 1.0 if (set(tokenize(query)) & known_colors_lower) else 0.0
 
 
+def query_has_category_token(query: str | None, known_category_tokens: frozenset[str]) -> float:
+    return 1.0 if (set(tokenize(query)) & known_category_tokens) else 0.0
+
+
 def query_has_size_pattern(query: str | None) -> float:
     return 1.0 if (query and _SIZE_RE.search(query)) else 0.0
 
@@ -89,3 +93,51 @@ def gender_intent_match(query_gender: float, product_gender_value: float) -> flo
 
 def gender_intent_mismatch(query_gender: float, product_gender_value: float) -> float:
     return 1.0 if query_gender and product_gender_value and query_gender != product_gender_value else 0.0
+
+
+def product_brand_match(query: str | None, brand: str | None) -> float:
+    query_tokens = set(tokenize(query))
+    brand_tokens = set(tokenize(brand))
+    return 1.0 if query_tokens and brand_tokens and bool(query_tokens & brand_tokens) else 0.0
+
+
+def product_brand_token_overlap(query: str | None, brand: str | None) -> float:
+    query_tokens = set(tokenize(query))
+    brand_tokens = set(tokenize(brand))
+    if not brand_tokens:
+        return 0.0
+    return float(len(query_tokens & brand_tokens) / len(brand_tokens))
+
+
+def product_color_match(query: str | None, color: str | None) -> float:
+    return product_brand_match(query, color)
+
+
+def query_token_coverage(
+    query: str | None,
+    text: str | None,
+    ignored_tokens: frozenset[str] = frozenset(),
+) -> float:
+    q = [t for t in tokenize(query) if t not in ignored_tokens]
+    if not q:
+        return 0.0
+    text_tokens = set(tokenize(text))
+    return float(sum(1 for t in q if t in text_tokens) / len(q))
+
+
+def exact_query_phrase_match(query: str | None, text: str | None) -> float:
+    q = " ".join(tokenize(query))
+    haystack = " ".join(tokenize(text))
+    return 1.0 if q and q in haystack else 0.0
+
+
+def token_overlap_fraction(query: str | None, text: str | None) -> float:
+    query_tokens = set(tokenize(query))
+    text_tokens = set(tokenize(text))
+    if not text_tokens:
+        return 0.0
+    return float(len(query_tokens & text_tokens) / len(text_tokens))
+
+
+def product_category_token_overlap(query: str | None, category_text: str | None) -> float:
+    return token_overlap_fraction(query, category_text)
