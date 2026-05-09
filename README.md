@@ -63,6 +63,11 @@ make bootstrap-search
 
 After that, `/search` should return `mode` values such as `hybrid+ltr` when the model and vectors are available.
 
+The promoted LightGBM model is written to `models/ltr_reranker.txt` plus
+`models/ltr_reranker.json`. Commit those files when you want another machine
+to use the trained ranker without rerunning BGE teacher scoring, training, or
+evaluation.
+
 ## Common Commands
 
 | Command | Purpose |
@@ -75,6 +80,7 @@ After that, `/search` should return `mode` values such as `hybrid+ltr` when the 
 | `make simulate` | Generate example searches, clicks, and purchases. |
 | `make label-bge-teacher` | Distill offline BGE teacher scores into LTR training rows. |
 | `make retrain-model` | Rebuild features, train, promote, and reload the ranker. |
+| `make use-checked-in-model` | Restart the API and load the model checked into `models/`. |
 | `make metrics` | Show DruSearch Prometheus metrics. |
 | `make test-go` | Run Go tests. |
 | `make test-py` | Run Python tests. |

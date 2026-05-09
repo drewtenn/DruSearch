@@ -149,7 +149,7 @@ services:
       LTR_MODEL_NAME: ${LTR_MODEL_NAME:-ltr_reranker}
     ports: ["8080:8080"]
     volumes:
-      - lgbm_models:/var/lib/drusearch/models:ro
+      - ./models:/var/lib/drusearch/models:ro
     healthcheck:
       test: ["CMD", "/app/api", "healthcheck"]
       interval: 5s
@@ -176,8 +176,8 @@ services:
       - ./pipelines:/app
       - ./infra:/app/infra:ro
       - ./libs:/libs:ro
+      - ./models:/lgbm_models
       - hfmodels:/models
-      - lgbm_models:/lgbm_models
 
 volumes:
   pgdata:
@@ -186,4 +186,3 @@ volumes:
   miniodata:
   mlflowdata:
   hfmodels:
-  lgbm_models:

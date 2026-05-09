@@ -48,7 +48,7 @@ help:
 		/^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) }' $(MAKEFILE_LIST)
 
 ##@ Lifecycle — start, stop, and inspect the local app
-.PHONY: up down logs ps restart ensure-admin-token bootstrap-search
+.PHONY: up down logs ps restart ensure-admin-token bootstrap-search use-checked-in-model verify-checked-in-model
 up: ## Start every service in Docker
 	$(COMPOSE) up -d --build
 down: ## Stop every service
@@ -74,6 +74,11 @@ bootstrap-search: ## Cold-start search: data, vectors, clicks, features, model, 
 	$(MAKE) train-ltr
 	$(MAKE) promote-model
 	$(MAKE) verify-promoted-model
+	$(COMPOSE) up -d --no-deps --force-recreate api
+	$(MAKE) reload-model
+verify-checked-in-model: ## Fail early if the checked-in model artifact is missing
+	@test -s "models/$${LTR_MODEL_NAME:-ltr_reranker}.txt"
+use-checked-in-model: verify-checked-in-model ## Restart API and load the checked-in model artifact
 	$(COMPOSE) up -d --no-deps --force-recreate api
 	$(MAKE) reload-model
 

@@ -29,6 +29,7 @@ import mlflow
 from mlflow.tracking import MlflowClient
 
 from pipelines.common.config import load
+from pipelines.features import _generated as feature_schema
 from pipelines.common.logging import configure
 
 log = configure("register.promote")
@@ -89,6 +90,17 @@ def _rewrite_for_leaves(text: str) -> str:
     return text
 
 
+def _metadata_for_version(version: mlflow.entities.model_registry.ModelVersion) -> dict:
+    return {
+        "name":                   version.name,
+        "version":                version.version,
+        "stage":                  version.current_stage,
+        "run_id":                 version.run_id,
+        "source":                 version.source,
+        "feature_schema_version": feature_schema.SCHEMA_VERSION,
+    }
+
+
 def main() -> int:
     cfg = load()
     mlflow.set_tracking_uri(cfg.mlflow_tracking_uri)
@@ -117,13 +129,7 @@ def main() -> int:
 
     # Companion metadata so the API can report what's loaded
     import json
-    META_FILE.write_text(json.dumps({
-        "name":       version.name,
-        "version":    version.version,
-        "stage":      version.current_stage,
-        "run_id":     version.run_id,
-        "source":     version.source,
-    }, indent=2))
+    META_FILE.write_text(json.dumps(_metadata_for_version(version), indent=2))
     log.info("wrote %s", META_FILE)
     return 0
 
