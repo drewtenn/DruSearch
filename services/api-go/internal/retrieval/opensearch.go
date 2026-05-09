@@ -7,19 +7,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"sync"
-	"unicode"
 
 	opensearch "github.com/opensearch-project/opensearch-go/v4"
-)
-
-const (
-	retrievalGenderNone = iota
-	retrievalGenderMen
-	retrievalGenderWomen
-	retrievalGenderBoys
-	retrievalGenderGirls
 )
 
 type Engine struct {
@@ -116,19 +106,10 @@ func buildBM25Body(query string, k int) ([]byte, error) {
 			"fields": []string{"title^2", "category_path^2", "category^1.5", "bullets", "description"},
 		},
 	}
-	searchQuery := baseQuery
-	if filter := genderCategoryFilter(query); filter != nil {
-		searchQuery = map[string]any{
-			"bool": map[string]any{
-				"must":   []any{baseQuery},
-				"filter": []any{filter},
-			},
-		}
-	}
 	return json.Marshal(map[string]any{
 		"size":    k,
 		"_source": sourceFields(),
-		"query":   searchQuery,
+		"query":   baseQuery,
 	})
 }
 
@@ -144,9 +125,6 @@ func buildKNNBody(query string, vec []float32, k int) ([]byte, error) {
 	titleVec := map[string]any{
 		"vector": vec,
 		"k":      k,
-	}
-	if filter := genderCategoryFilter(query); filter != nil {
-		titleVec["filter"] = filter
 	}
 	return json.Marshal(map[string]any{
 		"size":    k,
@@ -272,79 +250,6 @@ func (e *Engine) Hybrid(ctx context.Context, query string, vec []float32, candN,
 	// Sort by RRF desc.
 	sortHitsByRRF(hits)
 	return hits, nil
-}
-
-func genderCategoryFilter(query string) map[string]any {
-	var category string
-	switch retrievalQueryGenderIntent(query) {
-	case retrievalGenderMen:
-		category = "Men"
-	case retrievalGenderWomen:
-		category = "Women"
-	case retrievalGenderBoys:
-		category = "Boys"
-	case retrievalGenderGirls:
-		category = "Girls"
-	default:
-		return nil
-	}
-	return map[string]any{
-		"term": map[string]any{
-			"category_path.raw": category,
-		},
-	}
-}
-
-func retrievalQueryGenderIntent(query string) int {
-	found := retrievalGenderNone
-	for _, token := range retrievalTokens(query) {
-		g := retrievalGenderToken(token)
-		if g == retrievalGenderNone {
-			continue
-		}
-		if found != retrievalGenderNone && found != g {
-			return retrievalGenderNone
-		}
-		found = g
-	}
-	return found
-}
-
-func retrievalGenderToken(token string) int {
-	switch token {
-	case "men", "mens", "man", "male":
-		return retrievalGenderMen
-	case "women", "womens", "woman", "female":
-		return retrievalGenderWomen
-	case "boys", "boy":
-		return retrievalGenderBoys
-	case "girls", "girl":
-		return retrievalGenderGirls
-	default:
-		return retrievalGenderNone
-	}
-}
-
-func retrievalTokens(s string) []string {
-	if s == "" {
-		return nil
-	}
-	out := make([]string, 0, 8)
-	var sb strings.Builder
-	for _, r := range s {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' {
-			sb.WriteRune(unicode.ToLower(r))
-			continue
-		}
-		if sb.Len() > 0 {
-			out = append(out, sb.String())
-			sb.Reset()
-		}
-	}
-	if sb.Len() > 0 {
-		out = append(out, sb.String())
-	}
-	return out
 }
 
 func sortHitsByRRF(h []Hit) {

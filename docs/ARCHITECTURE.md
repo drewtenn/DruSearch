@@ -146,8 +146,8 @@ Concrete trace for `GET /search?q=running+shoes&k=10&ranker=ltr`:
    - BM25: `multi_match` over `title^2`, `category_path^2`, `category^1.5`,
      `bullets`, and `description`.
    - kNN: Lucene HNSW over `title_vec`, when embedding is available.
-   - Gender intent adds a `category_path.raw` filter for men, women, boys, or
-     girls queries.
+   - Structured query intent, including gender, stays in ranking features rather
+     than hard retrieval filters so sparse catalog metadata cannot zero results.
 4. Hybrid retrieval fuses BM25 and kNN with client-side RRF:
    `score(d) = sum(1 / (rrf_k + rank(d)))`, with `rrf_k=60` by default.
 5. If the ranker is `ltr` and a model is loaded, the API builds the v4 feature
