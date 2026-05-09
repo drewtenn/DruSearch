@@ -8,14 +8,18 @@ from functools import lru_cache
 
 from sentence_transformers import SentenceTransformer
 
+from app.torch_device import resolve_torch_device
+
 _MODEL_NAME = os.getenv("EMBEDDER_MODEL", "BAAI/bge-small-en-v1.5")
+_MODEL_DEVICE = os.getenv("EMBEDDER_DEVICE", "auto")
 _LOAD_LOCK = threading.Lock()
 
 
 @lru_cache(maxsize=1)
 def get_model() -> SentenceTransformer:
     with _LOAD_LOCK:
-        return SentenceTransformer(_MODEL_NAME)
+        device = resolve_torch_device(_MODEL_DEVICE, "EMBEDDER_DEVICE")
+        return SentenceTransformer(_MODEL_NAME, device=device)
 
 
 def model_name() -> str:

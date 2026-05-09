@@ -22,10 +22,12 @@ from tqdm import tqdm
 
 from pipelines.common import db
 from pipelines.common.logging import configure
+from pipelines.common.torch_device import move_wrapped_model_to_device, resolve_torch_device
 
 log = configure("label.bge_teacher")
 
 BGE_TEACHER_MODEL = os.getenv("BGE_TEACHER_MODEL", "BAAI/bge-reranker-v2-m3")
+BGE_TEACHER_DEVICE = os.getenv("BGE_TEACHER_DEVICE", "auto")
 BGE_TEACHER_BATCH_SIZE = int(os.getenv("BGE_TEACHER_BATCH_SIZE", "32"))
 BGE_TEACHER_MAX_ROWS = int(os.getenv("BGE_TEACHER_MAX_ROWS", "0"))
 
@@ -166,8 +168,9 @@ def _batched(items: list[list[str]], size: int) -> Iterable[list[list[str]]]:
 def score_with_bge(rows: pd.DataFrame) -> list[float]:
     from sentence_transformers import CrossEncoder
 
-    log.info("loading BGE teacher model=%s", BGE_TEACHER_MODEL)
-    model = CrossEncoder(BGE_TEACHER_MODEL)
+    device = resolve_torch_device(BGE_TEACHER_DEVICE, "BGE_TEACHER_DEVICE")
+    log.info("loading BGE teacher model=%s device=%s", BGE_TEACHER_MODEL, device)
+    model = move_wrapped_model_to_device(CrossEncoder(BGE_TEACHER_MODEL, device=device), device)
     pairs = [[str(row.query), str(row.document_text)] for row in rows.itertuples(index=False)]
     scores: list[float] = []
     total_batches = (len(pairs) + BGE_TEACHER_BATCH_SIZE - 1) // BGE_TEACHER_BATCH_SIZE

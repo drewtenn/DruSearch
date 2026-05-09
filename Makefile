@@ -2,6 +2,9 @@ SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
 COMPOSE := docker compose
+HOST_PIPELINE_VENV ?= .venv-pipelines
+HOST_PIPELINE_PYTHON ?= $(HOST_PIPELINE_VENV)/bin/python
+HOST_BGE_TEACHER_DEVICE ?= mps
 
 define ENSURE_ADMIN_TOKEN_PY
 from pathlib import Path
@@ -109,11 +112,39 @@ simulate: ## Generate fake searches, clicks, and purchases for training data
 	$(COMPOSE) run --rm pipelines python -m pipelines.simulate.click_simulator
 
 ##@ Phase 4 — teach and check a ranking model
-.PHONY: build-training-rows label-bge-teacher train-ltr retrain-model retrain-model-with-sim eval
+.PHONY: build-training-rows label-bge-teacher host-pipeline-venv check-host-mps label-bge-teacher-host train-ltr retrain-model retrain-model-with-sim eval
 build-training-rows: ## Convert logged behavior into examples the model can learn from
 	$(COMPOSE) run --rm pipelines python -m pipelines.label.build_training_rows
 label-bge-teacher: ## Score training rows with offline BGE and distill weak labels
 	$(COMPOSE) --profile jobs run --rm pipelines python -m pipelines.label.bge_teacher
+host-pipeline-venv: ## Create/update a local Python env for host-run pipelines
+	@command -v uv >/dev/null || { echo "uv is required. Install uv or set HOST_PIPELINE_PYTHON to an existing pipeline env."; exit 1; }
+	uv venv --allow-existing --python 3.11 $(HOST_PIPELINE_VENV)
+	uv pip install --python $(HOST_PIPELINE_PYTHON) -e ./pipelines
+check-host-mps: ## Verify the host pipeline Python can use Apple MPS
+	@if [ "$(HOST_BGE_TEACHER_DEVICE)" != "mps" ]; then \
+		echo "Skipping MPS preflight for HOST_BGE_TEACHER_DEVICE=$(HOST_BGE_TEACHER_DEVICE)"; \
+	else \
+		PYTHONPATH="$(CURDIR)/pipelines$${PYTHONPATH:+:$$PYTHONPATH}" \
+			$(HOST_PIPELINE_PYTHON) -c 'import torch; print(f"torch {torch.__version__}"); print(f"mps built: {torch.backends.mps.is_built()}"); print(f"mps available: {torch.backends.mps.is_available()}"); raise SystemExit(0 if torch.backends.mps.is_available() else "PyTorch MPS is not available; run make host-pipeline-venv or set HOST_BGE_TEACHER_DEVICE=cpu")'; \
+	fi
+label-bge-teacher-host: check-host-mps ## Run BGE teacher on the macOS host so Apple GPU/MPS can be used
+	@set -euo pipefail; \
+	set -a; [ ! -f .env ] || source .env; set +a; \
+	POSTGRES_HOST=localhost \
+	REDIS_HOST=localhost \
+	OPENSEARCH_HOST=localhost \
+	MINIO_HOST=localhost \
+	EMBEDDER_HOST=localhost \
+	MLFLOW_TRACKING_URI=http://localhost:5000 \
+	MLFLOW_S3_ENDPOINT_URL=http://localhost:9000 \
+	AWS_ACCESS_KEY_ID="$${MINIO_ROOT_USER:-drusearch}" \
+	AWS_SECRET_ACCESS_KEY="$${MINIO_ROOT_PASSWORD:-drusearch1234}" \
+	HF_HOME="$${HF_HOME:-$(CURDIR)/.cache/huggingface}" \
+	LTR_MODEL_DIR="$(CURDIR)/models" \
+	BGE_TEACHER_DEVICE="$(HOST_BGE_TEACHER_DEVICE)" \
+	PYTHONPATH="$(CURDIR)/pipelines$${PYTHONPATH:+:$$PYTHONPATH}" \
+	$(HOST_PIPELINE_PYTHON) -m pipelines.label.bge_teacher
 train-ltr: ## Train a model to reorder search results toward better matches
 	$(COMPOSE) run --rm pipelines python -m pipelines.train.lgbm_ranker
 retrain-model: refresh-product-features refresh-user-features build-training-rows label-bge-teacher train-ltr promote-model verify-promoted-model reload-model ## Retrain and reload LTR from existing events
