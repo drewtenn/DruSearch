@@ -37,6 +37,7 @@ RUN pip install \
         "numpy==2.1.3" \
         "scikit-learn==1.6.0" \
         "lightgbm==4.5.0" \
+        "xgboost==2.1.3" \
         "sentence-transformers==3.3.1" \
         "tqdm==4.67.1" \
         "tenacity==9.0.0" \

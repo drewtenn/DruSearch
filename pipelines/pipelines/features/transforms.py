@@ -156,7 +156,10 @@ def query_token_coverage(
     text: str | None,
     ignored_tokens: frozenset[str] = frozenset(),
 ) -> float:
-    q = [t for t in tokenize(query) if t not in ignored_tokens]
+    query_tokens = tokenize(query)
+    q = [t for t in query_tokens if t not in ignored_tokens]
+    if not q:
+        q = query_tokens
     if not q:
         return 0.0
     text_tokens = set(tokenize(text))

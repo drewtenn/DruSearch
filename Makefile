@@ -80,7 +80,10 @@ bootstrap-search: ## Cold-start search: data, vectors, clicks, features, model, 
 	$(COMPOSE) up -d --no-deps --force-recreate api
 	$(MAKE) reload-model
 verify-checked-in-model: ## Fail early if the checked-in model artifact is missing
-	@test -s "models/$${LTR_MODEL_NAME:-ltr_reranker}.txt"
+	@case "$${LTR_MODEL_BACKEND:-lgbm}" in \
+		xgboost|xgb) test -s "models/$${LTR_MODEL_NAME:-ltr_reranker}.xgb.json" ;; \
+		*) test -s "models/$${LTR_MODEL_NAME:-ltr_reranker}.txt" ;; \
+	esac
 use-checked-in-model: verify-checked-in-model ## Restart API and load the checked-in model artifact
 	$(COMPOSE) up -d --no-deps --force-recreate api
 	$(MAKE) reload-model
@@ -112,10 +115,11 @@ simulate: ## Generate fake searches, clicks, and purchases for training data
 	$(COMPOSE) run --rm pipelines python -m pipelines.simulate.click_simulator
 
 ##@ Phase 4 — teach and check a ranking model
-.PHONY: build-training-rows label-bge-teacher host-pipeline-venv check-host-mps label-bge-teacher-host train-ltr retrain-model retrain-model-with-sim eval
+.PHONY: build-training-rows label-bge-teacher label-bge-teacher-docker host-pipeline-venv check-host-mps label-bge-teacher-host train-ltr retrain-model retrain-model-with-sim eval
 build-training-rows: ## Convert logged behavior into examples the model can learn from
 	$(COMPOSE) run --rm pipelines python -m pipelines.label.build_training_rows
-label-bge-teacher: ## Score training rows with offline BGE and distill weak labels
+label-bge-teacher: label-bge-teacher-host ## Score training rows with offline BGE on the host/MPS path
+label-bge-teacher-docker: ## Score training rows with offline BGE in Docker using CPU PyTorch
 	$(COMPOSE) --profile jobs run --rm pipelines python -m pipelines.label.bge_teacher
 host-pipeline-venv: ## Create/update a local Python env for host-run pipelines
 	@command -v uv >/dev/null || { echo "uv is required. Install uv or set HOST_PIPELINE_PYTHON to an existing pipeline env."; exit 1; }
@@ -128,7 +132,7 @@ check-host-mps: ## Verify the host pipeline Python can use Apple MPS
 		PYTHONPATH="$(CURDIR)/pipelines$${PYTHONPATH:+:$$PYTHONPATH}" \
 			$(HOST_PIPELINE_PYTHON) -c 'import torch; print(f"torch {torch.__version__}"); print(f"mps built: {torch.backends.mps.is_built()}"); print(f"mps available: {torch.backends.mps.is_available()}"); raise SystemExit(0 if torch.backends.mps.is_available() else "PyTorch MPS is not available; run make host-pipeline-venv or set HOST_BGE_TEACHER_DEVICE=cpu")'; \
 	fi
-label-bge-teacher-host: check-host-mps ## Run BGE teacher on the macOS host so Apple GPU/MPS can be used
+label-bge-teacher-host: host-pipeline-venv check-host-mps ## Run BGE teacher on the macOS host so Apple GPU/MPS can be used
 	@set -euo pipefail; \
 	set -a; [ ! -f .env ] || source .env; set +a; \
 	POSTGRES_HOST=localhost \
@@ -145,7 +149,7 @@ label-bge-teacher-host: check-host-mps ## Run BGE teacher on the macOS host so A
 	BGE_TEACHER_DEVICE="$(HOST_BGE_TEACHER_DEVICE)" \
 	PYTHONPATH="$(CURDIR)/pipelines$${PYTHONPATH:+:$$PYTHONPATH}" \
 	$(HOST_PIPELINE_PYTHON) -m pipelines.label.bge_teacher
-train-ltr: ## Train a model to reorder search results toward better matches
+train-ltr: ## Train the configured LTR model backend to reorder search results
 	$(COMPOSE) run --rm pipelines python -m pipelines.train.lgbm_ranker
 retrain-model: refresh-product-features refresh-user-features build-training-rows label-bge-teacher train-ltr promote-model verify-promoted-model reload-model ## Retrain and reload LTR from existing events
 retrain-model-with-sim: simulate retrain-model ## Generate fresh simulated events, then retrain and reload LTR
@@ -157,7 +161,7 @@ eval: ## Measure ranking quality without changing the live API
 promote-model: ## Copy the chosen trained model where the API can read it
 	$(COMPOSE) --profile jobs run --rm -e LTR_MODEL_STAGE= pipelines python -m pipelines.register.promote
 verify-promoted-model: ## Fail early if the API model file has not been promoted
-	$(COMPOSE) --profile jobs run --rm pipelines sh -c 'test -s "$${LTR_MODEL_DIR:-/lgbm_models}/$${LTR_MODEL_NAME:-ltr_reranker}.txt"'
+	$(COMPOSE) --profile jobs run --rm pipelines sh -c 'case "$${LTR_MODEL_BACKEND:-lgbm}" in xgboost|xgb) test -s "$${LTR_MODEL_DIR:-/lgbm_models}/$${LTR_MODEL_NAME:-ltr_reranker}.xgb.json" ;; *) test -s "$${LTR_MODEL_DIR:-/lgbm_models}/$${LTR_MODEL_NAME:-ltr_reranker}.txt" ;; esac'
 reload-model: ## Ask the running API to load the latest promoted model
 	@set -euo pipefail; \
 	admin_token="$${ADMIN_TOKEN:-}"; \

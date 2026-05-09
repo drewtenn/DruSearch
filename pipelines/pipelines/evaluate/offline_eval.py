@@ -3,8 +3,8 @@
 Two variants, both computed on the same set of ESCI test queries:
 
   hybrid_rrf  — order returned by the API today (BM25 + k-NN, RRF-fused)
-  ltr         — re-rank the same RRF candidates with the LightGBM LambdaRank
-                model (latest MLflow version of LTR_MODEL_NAME)
+  ltr         — re-rank the same RRF candidates with the configured LTR model
+                backend (latest MLflow version of LTR_MODEL_NAME)
 
 We score against ESCI labels: E=4, S=3, C=2, I=0 in classic-NDCG gain space.
 
@@ -26,7 +26,7 @@ import numpy as np
 import pandas as pd
 
 from pipelines.common import db
-from pipelines.common.config import load
+from pipelines.common.config import load, normalize_ltr_model_backend
 from pipelines.common.logging import configure
 from pipelines.features import FEATURE_NAMES
 from pipelines.features import transforms as tf
@@ -40,6 +40,7 @@ log = configure("evaluate.offline")
 
 ESCI_GAIN = {"E": 4.0, "S": 3.0, "C": 2.0, "I": 0.0}
 LTR_MODEL_NAME = os.getenv("LTR_MODEL_NAME", "ltr_reranker")
+LTR_MODEL_BACKEND = normalize_ltr_model_backend(os.getenv("LTR_MODEL_BACKEND", "lgbm"))
 EVAL_QUERIES = int(os.getenv("EVAL_QUERIES", "500"))
 EVAL_K = int(os.getenv("EVAL_K", "10"))
 CAND_N = int(os.getenv("EVAL_CAND_N", "200"))
@@ -251,19 +252,64 @@ def recall_at_k(judgments_for_query: dict[str, str], hit_ids: list[str], k: int)
 # Loaders
 # ---------------------------------------------------------------------------
 
+def _import_xgboost():
+    try:
+        import xgboost as xgb  # type: ignore[import-untyped]
+    except ImportError as exc:  # pragma: no cover - dependency error path
+        raise RuntimeError(
+            "LTR_MODEL_BACKEND=xgboost requires the xgboost package. "
+            "Rebuild the pipelines image or install the pipeline dependencies."
+        ) from exc
+    return xgb
+
+
+def _artifact_path_for_backend(model_backend: str) -> str:
+    if model_backend == "lgbm":
+        return "model_text/model.txt"
+    if model_backend == "xgboost":
+        return "model_xgboost/model.json"
+    raise ValueError(f"unsupported LTR model backend: {model_backend}")
+
+
+def _version_backend(client: mlflow.tracking.MlflowClient, version) -> str:
+    run = client.get_run(version.run_id)
+    return normalize_ltr_model_backend(run.data.params.get("ltr_model_backend", "lgbm"))
+
+
 def _load_latest_ltr_model():
     cfg = load()
     mlflow.set_tracking_uri(cfg.mlflow_tracking_uri)
     client = mlflow.tracking.MlflowClient()
     versions = client.search_model_versions(f"name='{LTR_MODEL_NAME}'")
+    versions = [v for v in versions if _version_backend(client, v) == cfg.ltr_model_backend]
     if not versions:
         return None
     latest = max(versions, key=lambda v: int(v.version))
-    log.info("loading LTR model name=%s version=%s", LTR_MODEL_NAME, latest.version)
-    # Pull the raw model.txt artifact (faster + closer to Go inference path)
+    log.info(
+        "loading LTR model name=%s version=%s backend=%s",
+        LTR_MODEL_NAME, latest.version, cfg.ltr_model_backend,
+    )
     run_id = latest.run_id
-    local = client.download_artifacts(run_id, "model_text/model.txt")
-    return lgb.Booster(model_file=local)
+    local = client.download_artifacts(run_id, _artifact_path_for_backend(cfg.ltr_model_backend))
+    if cfg.ltr_model_backend == "lgbm":
+        return lgb.Booster(model_file=local)
+    xgb = _import_xgboost()
+    booster = xgb.Booster()
+    booster.load_model(local)
+    return booster
+
+
+def _predict_ltr(booster, X: np.ndarray) -> np.ndarray:
+    if LTR_MODEL_BACKEND == "lgbm":
+        return booster.predict(X, num_iteration=booster.best_iteration)
+    if LTR_MODEL_BACKEND == "xgboost":
+        xgb = _import_xgboost()
+        kwargs = {}
+        best_iteration = getattr(booster, "best_iteration", None)
+        if best_iteration is not None:
+            kwargs["iteration_range"] = (0, best_iteration + 1)
+        return booster.predict(xgb.DMatrix(X), **kwargs)
+    raise ValueError(f"unsupported LTR model backend: {LTR_MODEL_BACKEND}")
 
 
 # ---------------------------------------------------------------------------
@@ -317,7 +363,7 @@ def main() -> int:
 
             if booster is not None:
                 X = build_feature_matrix(qtext, hits, cat)
-                preds = booster.predict(X, num_iteration=booster.best_iteration)
+                preds = _predict_ltr(booster, X)
                 order = np.argsort(-preds)
                 ids_ltr = [hits[k]["product_id"] for k in order]
                 gains_ltr = np.array(
@@ -382,6 +428,7 @@ def main() -> int:
                     "cand_n": CAND_N,
                     "k": EVAL_K,
                     "ltr_model_name": LTR_MODEL_NAME if booster is not None else "none",
+                    "ltr_model_backend": LTR_MODEL_BACKEND if booster is not None else "none",
                 })
                 for variant in ("rrf", "ltr"):
                     if variant in result:

@@ -1,6 +1,6 @@
-// Package rerank wraps a LightGBM model loaded via dmitryikh/leaves
-// and applies it to a list of retrieval candidates. The model file
-// path is provided by promote.py and reload-able via the admin API.
+// Package rerank wraps a promoted LTR model and applies it to retrieval
+// candidates. LightGBM is loaded via dmitryikh/leaves; XGBoost is loaded
+// from the native JSON artifact written by Booster.save_model.
 package rerank
 
 import (
@@ -21,9 +21,18 @@ import (
 
 type Loaded struct {
 	Ensemble *leaves.Ensemble
+	Scorer   Scorer
 	Path     string
 	Meta     map[string]any
 	LoadedAt time.Time
+}
+
+type Scorer interface {
+	Score(matrix []float64, nrows int) ([]float64, error)
+}
+
+type lightGBMScorer struct {
+	ensemble *leaves.Ensemble
 }
 
 // Reranker holds the currently-loaded ensemble. Callers Read with Get
@@ -44,6 +53,9 @@ func New(dir, name string) *Reranker {
 func (r *Reranker) modelPath() string {
 	return filepath.Join(r.dir, r.name+".txt")
 }
+func (r *Reranker) xgboostModelPath() string {
+	return filepath.Join(r.dir, r.name+".xgb.json")
+}
 func (r *Reranker) metaPath() string {
 	return filepath.Join(r.dir, r.name+".json")
 }
@@ -51,20 +63,43 @@ func (r *Reranker) metaPath() string {
 // Reload reads the artifact from disk and atomically swaps the pointer.
 // If no model file is present, returns os.ErrNotExist.
 func (r *Reranker) Reload() (*Loaded, error) {
-	path := r.modelPath()
-	if _, err := os.Stat(path); err != nil {
-		return nil, err
-	}
-	ens, err := leaves.LGEnsembleFromFile(path, false)
-	if err != nil {
-		return nil, fmt.Errorf("leaves load %s: %w", path, err)
-	}
 	meta := map[string]any{}
 	if b, err := os.ReadFile(r.metaPath()); err == nil {
 		_ = json.Unmarshal(b, &meta)
 	}
+	backend := modelBackend(meta)
+	var (
+		path   string
+		scorer Scorer
+		ens    *leaves.Ensemble
+		err    error
+	)
+	switch backend {
+	case "lgbm":
+		path = r.modelPath()
+		if _, err := os.Stat(path); err != nil {
+			return nil, err
+		}
+		ens, err = leaves.LGEnsembleFromFile(path, false)
+		if err != nil {
+			return nil, fmt.Errorf("leaves load %s: %w", path, err)
+		}
+		scorer = lightGBMScorer{ensemble: ens}
+	case "xgboost":
+		path = r.xgboostModelPath()
+		if _, err := os.Stat(path); err != nil {
+			return nil, err
+		}
+		scorer, err = LoadXGBoost(path)
+		if err != nil {
+			return nil, err
+		}
+	default:
+		return nil, fmt.Errorf("unsupported model_backend %q", backend)
+	}
 	loaded := &Loaded{
 		Ensemble: ens,
+		Scorer:   scorer,
 		Path:     path,
 		Meta:     meta,
 		LoadedAt: time.Now().UTC(),
@@ -90,14 +125,35 @@ func (r *Reranker) Get() *Loaded {
 	return r.current.Load()
 }
 
+func modelBackend(meta map[string]any) string {
+	if v, ok := meta["model_backend"].(string); ok && v != "" {
+		switch v {
+		case "lgbm", "lightgbm":
+			return "lgbm"
+		case "xgboost", "xgb":
+			return "xgboost"
+		default:
+			return v
+		}
+	}
+	return "lgbm"
+}
+
 // Score runs the loaded model on a per-row dense feature matrix and returns
 // one prediction per row. Caller is responsible for sorting by score.
 func (l *Loaded) Score(matrix []float64, nrows int) ([]float64, error) {
-	if l == nil || l.Ensemble == nil {
+	if l == nil || l.Scorer == nil {
+		return nil, fmt.Errorf("no model loaded")
+	}
+	return l.Scorer.Score(matrix, nrows)
+}
+
+func (s lightGBMScorer) Score(matrix []float64, nrows int) ([]float64, error) {
+	if s.ensemble == nil {
 		return nil, fmt.Errorf("no model loaded")
 	}
 	preds := make([]float64, nrows)
-	if err := l.Ensemble.PredictDense(
+	if err := s.ensemble.PredictDense(
 		matrix, nrows, features.NumFeatures, preds,
 		0, // 0 = use all trees
 		1, // single-threaded; reranker hot-path

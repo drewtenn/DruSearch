@@ -41,7 +41,7 @@ func FromEnv() (Config, error) {
 		OpenSearchIndex: getenv("OPENSEARCH_INDEX", "products_v1"),
 		EmbedderURL:     fmt.Sprintf("http://%s:%s", getenv("EMBEDDER_HOST", "embedder"), getenv("EMBEDDER_PORT", "8000")),
 		EmbedderTimeout: 2 * time.Second,
-		DefaultRanker:   getenv("DEFAULT_RANKER", "hybrid"),
+		DefaultRanker:   getenv("DEFAULT_RANKER", "ltr"),
 		AdminToken:      os.Getenv("ADMIN_TOKEN"),
 		LTRModelDir:     getenv("LTR_MODEL_DIR", "/var/lib/drusearch/models"),
 		LTRModelName:    getenv("LTR_MODEL_NAME", "ltr_reranker"),

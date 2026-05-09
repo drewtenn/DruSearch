@@ -184,21 +184,23 @@ func QueryTokenCoverage(query, text string, ignored map[string]struct{}) float64
 		return 0
 	}
 	textTokens := tokenSet(Tokenize(text))
-	kept := 0
-	matched := 0
+	keptTokens := make([]string, 0, len(queryTokens))
 	for _, t := range queryTokens {
 		if _, skip := ignored[t]; skip {
 			continue
 		}
-		kept++
+		keptTokens = append(keptTokens, t)
+	}
+	if len(keptTokens) == 0 {
+		keptTokens = queryTokens
+	}
+	matched := 0
+	for _, t := range keptTokens {
 		if _, ok := textTokens[t]; ok {
 			matched++
 		}
 	}
-	if kept == 0 {
-		return 0
-	}
-	return float64(matched) / float64(kept)
+	return float64(matched) / float64(len(keptTokens))
 }
 
 func ExactQueryPhraseMatch(query, text string) float64 {

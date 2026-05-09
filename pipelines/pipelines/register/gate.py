@@ -13,12 +13,11 @@ from __future__ import annotations
 import os
 import sys
 
-import lightgbm as lgb
 import mlflow
 import numpy as np
 
 from mlflow.tracking import MlflowClient
-from pipelines.common.config import load
+from pipelines.common.config import load, normalize_ltr_model_backend
 from pipelines.common.logging import configure
 from pipelines.evaluate.offline_eval import (
     HybridRetriever,
@@ -33,19 +32,63 @@ from pipelines.evaluate.offline_eval import (
 log = configure("register.gate")
 
 LTR_MODEL_NAME = os.getenv("LTR_MODEL_NAME", "ltr_reranker")
+LTR_MODEL_BACKEND = normalize_ltr_model_backend(os.getenv("LTR_MODEL_BACKEND", "lgbm"))
 TOL_NDCG = float(os.getenv("PROMOTE_TOL_NDCG", "0.0"))
 EVAL_QUERIES = int(os.getenv("EVAL_QUERIES", "500"))
 EVAL_K = int(os.getenv("EVAL_K", "10"))
 CAND_N = int(os.getenv("EVAL_CAND_N", "200"))
 
 
-def _load_model_for(version) -> lgb.Booster:
+def _artifact_path_for_backend(model_backend: str) -> str:
+    if model_backend == "lgbm":
+        return "model_text/model.txt"
+    if model_backend == "xgboost":
+        return "model_xgboost/model.json"
+    raise ValueError(f"unsupported LTR model backend: {model_backend}")
+
+
+def _import_xgboost():
+    try:
+        import xgboost as xgb  # type: ignore[import-untyped]
+    except ImportError as exc:  # pragma: no cover - dependency error path
+        raise RuntimeError(
+            "LTR_MODEL_BACKEND=xgboost requires the xgboost package. "
+            "Rebuild the pipelines image or install the pipeline dependencies."
+        ) from exc
+    return xgb
+
+
+def _version_backend(client: MlflowClient, version) -> str:
+    run = client.get_run(version.run_id)
+    return normalize_ltr_model_backend(run.data.params.get("ltr_model_backend", "lgbm"))
+
+
+def _load_model_for(version, model_backend: str):
     client = MlflowClient()
-    local = client.download_artifacts(version.run_id, "model_text/model.txt")
-    return lgb.Booster(model_file=local)
+    local = client.download_artifacts(version.run_id, _artifact_path_for_backend(model_backend))
+    if model_backend == "lgbm":
+        import lightgbm as lgb
+        return lgb.Booster(model_file=local)
+    xgb = _import_xgboost()
+    booster = xgb.Booster()
+    booster.load_model(local)
+    return booster
 
 
-def _ndcg_at_k_for_model(booster: lgb.Booster, queries, judgments, retriever, cat) -> float:
+def _predict(model_backend: str, booster, X: np.ndarray) -> np.ndarray:
+    if model_backend == "lgbm":
+        return booster.predict(X, num_iteration=booster.best_iteration)
+    if model_backend == "xgboost":
+        xgb = _import_xgboost()
+        best_iteration = getattr(booster, "best_iteration", None)
+        kwargs = {}
+        if best_iteration is not None:
+            kwargs["iteration_range"] = (0, best_iteration + 1)
+        return booster.predict(xgb.DMatrix(X), **kwargs)
+    raise ValueError(f"unsupported LTR model backend: {model_backend}")
+
+
+def _ndcg_at_k_for_model(model_backend: str, booster, queries, judgments, retriever, cat) -> float:
     scores: list[float] = []
     for qid, qtext in queries:
         jset = judgments.get(qid, {})
@@ -55,7 +98,7 @@ def _ndcg_at_k_for_model(booster: lgb.Booster, queries, judgments, retriever, ca
         if not hits:
             continue
         X = build_feature_matrix(qtext, hits, cat)
-        preds = booster.predict(X, num_iteration=booster.best_iteration)
+        preds = _predict(model_backend, booster, X)
         order = np.argsort(-preds)
         gains = np.array([ESCI_GAIN.get(jset.get(hits[k]["product_id"], "I"), 0.0) for k in order], dtype=np.float64)
         ideal = np.sort(np.array([ESCI_GAIN.get(l, 0.0) for l in jset.values()]))[::-1]
@@ -65,20 +108,22 @@ def _ndcg_at_k_for_model(booster: lgb.Booster, queries, judgments, retriever, ca
 
 def main() -> int:
     cfg = load()
+    model_backend = cfg.ltr_model_backend
     mlflow.set_tracking_uri(cfg.mlflow_tracking_uri)
     client = MlflowClient()
 
     versions = client.search_model_versions(f"name='{LTR_MODEL_NAME}'")
+    versions = [v for v in versions if _version_backend(client, v) == model_backend]
     if not versions:
-        log.error("no versions registered for %s", LTR_MODEL_NAME)
+        log.error("no %s versions registered for %s", model_backend, LTR_MODEL_NAME)
         return 1
     versions.sort(key=lambda v: int(v.version))
     candidate = versions[-1]
     prod = next((v for v in versions if (v.current_stage or "") == "Production"), None)
 
     log.info(
-        "candidate name=%s v=%s stage=%s; current production v=%s",
-        candidate.name, candidate.version, candidate.current_stage,
+        "candidate name=%s v=%s stage=%s backend=%s; current production v=%s",
+        candidate.name, candidate.version, candidate.current_stage, model_backend,
         prod.version if prod else "(none)",
     )
 
@@ -91,14 +136,14 @@ def main() -> int:
     cat = _load_catalog()
     retriever = HybridRetriever()
     try:
-        cand_booster = _load_model_for(candidate)
-        cand_score = _ndcg_at_k_for_model(cand_booster, test_queries, judgments, retriever, cat)
+        cand_booster = _load_model_for(candidate, model_backend)
+        cand_score = _ndcg_at_k_for_model(model_backend, cand_booster, test_queries, judgments, retriever, cat)
         log.info("candidate v=%s ESCI NDCG@10=%.4f", candidate.version, cand_score)
 
         prod_score = 0.0
         if prod:
-            prod_booster = _load_model_for(prod)
-            prod_score = _ndcg_at_k_for_model(prod_booster, test_queries, judgments, retriever, cat)
+            prod_booster = _load_model_for(prod, model_backend)
+            prod_score = _ndcg_at_k_for_model(model_backend, prod_booster, test_queries, judgments, retriever, cat)
             log.info("production v=%s ESCI NDCG@10=%.4f", prod.version, prod_score)
         else:
             log.info("no current production; any non-zero candidate is acceptable")

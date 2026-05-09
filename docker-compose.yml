@@ -173,6 +173,7 @@ services:
       HF_HOME: /models
       LTR_MODEL_DIR: /lgbm_models
       LTR_MODEL_NAME: ${LTR_MODEL_NAME:-ltr_reranker}
+      LTR_MODEL_BACKEND: ${LTR_MODEL_BACKEND:-lgbm}
       BGE_TEACHER_DEVICE: ${BGE_TEACHER_DEVICE:-auto}
     volumes:
       - ./pipelines:/app

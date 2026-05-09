@@ -71,7 +71,7 @@ func main() {
 		)
 	}
 
-	// Optional LightGBM reranker; nil-ok if no model is on disk yet.
+	// Optional LTR reranker; nil-ok if no model is on disk yet.
 	rr := rerank.New(cfg.LTRModelDir, cfg.LTRModelName)
 	if loaded, err := rr.Reload(); err != nil {
 		logger.Warn("LTR model not loaded at boot; /search will use RRF only",

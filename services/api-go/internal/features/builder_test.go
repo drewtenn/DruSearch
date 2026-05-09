@@ -45,3 +45,14 @@ func TestBuildMatrixAffordabilityPriceScoreInactiveWithoutIntent(t *testing.T) {
 		t.Fatalf("affordability price score = %v, want 0", got)
 	}
 }
+
+func TestQueryTokenCoverageKeepsBrandTokensWhenQueryIsOnlyBrand(t *testing.T) {
+	brands := map[string]struct{}{"jordan": {}}
+
+	if got := QueryTokenCoverage("jordan", "Air Jordan Future", brands); got != 1 {
+		t.Fatalf("coverage for title match = %v, want 1", got)
+	}
+	if got := QueryTokenCoverage("jordan", "Anti Crease Shoe Guard", brands); got != 0 {
+		t.Fatalf("coverage for title mismatch = %v, want 0", got)
+	}
+}

@@ -162,3 +162,10 @@ def test_schema_matches_generated():
     )
     assert NUM_FEATURES == gen.NUM_FEATURES
     assert gen.SCHEMA_VERSION == "v4"
+
+
+def test_query_token_coverage_keeps_brand_tokens_when_query_is_only_brand():
+    brands = frozenset({"jordan"})
+
+    assert query_token_coverage("jordan", "Air Jordan Future", brands) == 1.0
+    assert query_token_coverage("jordan", "Anti Crease Shoe Guard", brands) == 0.0

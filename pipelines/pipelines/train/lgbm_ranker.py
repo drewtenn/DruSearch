@@ -1,4 +1,4 @@
-"""Train a LightGBM LambdaRank model on training_rows and log it to MLflow.
+"""Train an LTR ranker on training_rows and log it to MLflow.
 
 Run: docker compose --profile jobs run --rm pipelines \\
         python -m pipelines.train.lgbm_ranker
@@ -29,6 +29,15 @@ EXPERIMENT = os.getenv("MLFLOW_EXPERIMENT", "drusearch-ltr")
 MODEL_NAME = os.getenv("LTR_MODEL_NAME", "ltr_reranker")
 NUM_BOOST_ROUND = int(os.getenv("LGBM_BOOST_ROUNDS", "1000"))
 EARLY_STOP = int(os.getenv("LGBM_EARLY_STOP", "50"))
+XGBOOST_TREE_METHOD = os.getenv("XGBOOST_TREE_METHOD", "hist")
+
+
+def _artifact_path_for_backend(model_backend: str) -> str:
+    if model_backend == "lgbm":
+        return "model_text/model.txt"
+    if model_backend == "xgboost":
+        return "model_xgboost/model.json"
+    raise ValueError(f"unsupported LTR model backend: {model_backend}")
 
 
 def _load_training_rows() -> pd.DataFrame:
@@ -58,8 +67,119 @@ def _build_matrix(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, np.ndarray]
     return X, y, group_sizes
 
 
+def _sorted_query_ids(df: pd.DataFrame) -> np.ndarray:
+    return df.sort_values("query_id")["query_id"].to_numpy()
+
+
+def _train_lgbm(
+    X_tr: np.ndarray,
+    y_tr: np.ndarray,
+    g_tr: np.ndarray,
+    X_va: np.ndarray,
+    y_va: np.ndarray,
+    g_va: np.ndarray,
+) -> tuple[lgb.Booster, dict, dict]:
+    train_set = lgb.Dataset(X_tr, label=y_tr, group=g_tr, feature_name=list(FEATURE_NAMES))
+    val_set = lgb.Dataset(X_va, label=y_va, group=g_va, feature_name=list(FEATURE_NAMES), reference=train_set)
+
+    # ESCI-derived labels: 0 (unjudged or 'I'), 2 ('C'), 3 ('S'), 4 ('E').
+    # label_gain entries map label index i to its gain; values 0..4 are needed.
+    params = {
+        "objective": "lambdarank",
+        "metric": "ndcg",
+        "ndcg_eval_at": [5, 10],
+        "label_gain": [0, 1, 3, 7, 15],
+        "learning_rate": 0.05,
+        "num_leaves": 31,
+        "min_data_in_leaf": 100,
+        "feature_fraction": 0.9,
+        "bagging_fraction": 0.9,
+        "bagging_freq": 5,
+        "lambda_l2": 1.0,
+        "verbose": -1,
+    }
+    evals_result: dict = {}
+    booster = lgb.train(
+        params,
+        train_set,
+        num_boost_round=NUM_BOOST_ROUND,
+        valid_sets=[train_set, val_set],
+        valid_names=["train", "val"],
+        callbacks=[
+            lgb.early_stopping(EARLY_STOP),
+            lgb.log_evaluation(period=25),
+            lgb.record_evaluation(evals_result),
+        ],
+    )
+    return booster, params, evals_result
+
+
+def _import_xgboost():
+    try:
+        import mlflow.xgboost  # type: ignore[import-untyped]
+        import xgboost as xgb  # type: ignore[import-untyped]
+    except ImportError as exc:  # pragma: no cover - dependency error path
+        raise RuntimeError(
+            "LTR_MODEL_BACKEND=xgboost requires the xgboost package. "
+            "Rebuild the pipelines image or install the pipeline dependencies."
+        ) from exc
+    return xgb, mlflow.xgboost
+
+
+def _train_xgboost(
+    train_df: pd.DataFrame,
+    val_df: pd.DataFrame,
+    X_tr: np.ndarray,
+    y_tr: np.ndarray,
+    X_va: np.ndarray,
+    y_va: np.ndarray,
+) -> tuple[object, dict, dict]:
+    xgb, _mlflow_xgboost = _import_xgboost()
+    params = {
+        "objective": "rank:ndcg",
+        "eval_metric": ["ndcg@5", "ndcg@10"],
+        "learning_rate": 0.05,
+        "max_depth": 6,
+        "min_child_weight": 100,
+        "subsample": 0.9,
+        "colsample_bytree": 0.9,
+        "reg_lambda": 1.0,
+        "tree_method": XGBOOST_TREE_METHOD,
+        "random_state": 42,
+        "n_estimators": NUM_BOOST_ROUND,
+        "early_stopping_rounds": EARLY_STOP,
+    }
+    ranker = xgb.XGBRanker(**params)
+    eval_set = [(X_tr, y_tr), (X_va, y_va)]
+    eval_qid = [_sorted_query_ids(train_df), _sorted_query_ids(val_df)]
+    ranker.fit(
+        X_tr,
+        y_tr,
+        qid=_sorted_query_ids(train_df),
+        eval_set=eval_set,
+        eval_qid=eval_qid,
+        verbose=25,
+    )
+    return ranker, params, ranker.evals_result()
+
+
+def _predict(model_backend: str, booster: object, X: np.ndarray) -> np.ndarray:
+    if model_backend == "lgbm":
+        return booster.predict(X, num_iteration=booster.best_iteration)  # type: ignore[attr-defined]
+    if model_backend == "xgboost":
+        xgb, _mlflow_xgboost = _import_xgboost()
+        dmatrix = xgb.DMatrix(X)
+        best_iteration = getattr(booster, "best_iteration", None)
+        kwargs = {}
+        if best_iteration is not None:
+            kwargs["iteration_range"] = (0, best_iteration + 1)
+        return booster.predict(dmatrix, **kwargs)
+    raise ValueError(f"unsupported LTR model backend: {model_backend}")
+
+
 def main() -> int:
     cfg = load()
+    model_backend = cfg.ltr_model_backend
     mlflow.set_tracking_uri(cfg.mlflow_tracking_uri)
     mlflow.set_experiment(EXPERIMENT)
 
@@ -81,30 +201,10 @@ def main() -> int:
     X_va, y_va, g_va = _build_matrix(val_df)
     X_te, y_te, g_te = _build_matrix(test_df)
 
-    train_set = lgb.Dataset(X_tr, label=y_tr, group=g_tr, feature_name=list(FEATURE_NAMES))
-    val_set   = lgb.Dataset(X_va, label=y_va, group=g_va, feature_name=list(FEATURE_NAMES), reference=train_set)
-
-    # ESCI-derived labels: 0 (unjudged or 'I'), 2 ('C'), 3 ('S'), 4 ('E').
-    # label_gain entries map label index i to its gain; values 0..4 are needed.
-    params = {
-        "objective": "lambdarank",
-        "metric": "ndcg",
-        "ndcg_eval_at": [5, 10],
-        "label_gain": [0, 1, 3, 7, 15],
-        "learning_rate": 0.05,
-        "num_leaves": 31,
-        "min_data_in_leaf": 100,
-        "feature_fraction": 0.9,
-        "bagging_fraction": 0.9,
-        "bagging_freq": 5,
-        "lambda_l2": 1.0,
-        "verbose": -1,
-    }
-
-    log.info("starting MLflow run experiment=%s", EXPERIMENT)
+    log.info("starting MLflow run experiment=%s backend=%s", EXPERIMENT, model_backend)
     with mlflow.start_run() as run:
         mlflow.log_params({
-            **params,
+            "ltr_model_backend": model_backend,
             "num_features":   len(FEATURE_NAMES),
             "feature_names":  ",".join(FEATURE_NAMES),
             "num_boost_round": NUM_BOOST_ROUND,
@@ -117,22 +217,18 @@ def main() -> int:
             "test_queries":  test_df["query_id"].nunique(),
         })
 
-        evals_result: dict = {}
         started = time.perf_counter()
-        booster = lgb.train(
-            params,
-            train_set,
-            num_boost_round=NUM_BOOST_ROUND,
-            valid_sets=[train_set, val_set],
-            valid_names=["train", "val"],
-            callbacks=[
-                lgb.early_stopping(EARLY_STOP),
-                lgb.log_evaluation(period=25),
-                lgb.record_evaluation(evals_result),
-            ],
-        )
+        if model_backend == "lgbm":
+            booster, params, evals_result = _train_lgbm(X_tr, y_tr, g_tr, X_va, y_va, g_va)
+        elif model_backend == "xgboost":
+            ranker, params, evals_result = _train_xgboost(train_df, val_df, X_tr, y_tr, X_va, y_va)
+            booster = ranker.get_booster()
+        else:
+            raise ValueError(f"unsupported LTR model backend: {model_backend}")
+        mlflow.log_params(params)
         elapsed = time.perf_counter() - started
-        log.info("trained best_iter=%d in %.1fs", booster.best_iteration, elapsed)
+        best_iter = getattr(booster, "best_iteration", None)
+        log.info("trained backend=%s best_iter=%s in %.1fs", model_backend, best_iter, elapsed)
 
         # Log curves; sanitize metric names ('@' is not allowed in MLflow names).
         for split_name, metrics in evals_result.items():
@@ -143,7 +239,7 @@ def main() -> int:
 
         # Final test metrics
         if len(X_te) > 0:
-            preds = booster.predict(X_te, num_iteration=booster.best_iteration)
+            preds = _predict(model_backend, booster, X_te)
             ndcg10 = _ndcg_at_k(test_df["query_id"].to_numpy(), y_te, preds, k=10)
             ndcg5  = _ndcg_at_k(test_df["query_id"].to_numpy(), y_te, preds, k=5)
             mrr   = _mrr(test_df["query_id"].to_numpy(), y_te, preds)
@@ -154,15 +250,25 @@ def main() -> int:
 
         # Save and log model
         with tempfile.TemporaryDirectory() as tmp:
-            model_txt = Path(tmp) / "model.txt"
-            booster.save_model(str(model_txt))
-            mlflow.log_artifact(str(model_txt), artifact_path="model_text")
-
-            mlflow.lightgbm.log_model(
-                lgb_model=booster,
-                artifact_path="model",
-                registered_model_name=MODEL_NAME,
-            )
+            if model_backend == "lgbm":
+                model_txt = Path(tmp) / "model.txt"
+                booster.save_model(str(model_txt))
+                mlflow.log_artifact(str(model_txt), artifact_path="model_text")
+                mlflow.lightgbm.log_model(
+                    lgb_model=booster,
+                    artifact_path="model",
+                    registered_model_name=MODEL_NAME,
+                )
+            elif model_backend == "xgboost":
+                _xgb, mlflow_xgboost = _import_xgboost()
+                model_json = Path(tmp) / "model.json"
+                booster.save_model(str(model_json))
+                mlflow.log_artifact(str(model_json), artifact_path="model_xgboost")
+                mlflow_xgboost.log_model(
+                    xgb_model=booster,
+                    artifact_path="model",
+                    registered_model_name=MODEL_NAME,
+                )
         log.info("logged model to MLflow run_id=%s name=%s", run.info.run_id, MODEL_NAME)
 
     return 0

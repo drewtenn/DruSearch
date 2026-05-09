@@ -32,6 +32,7 @@ class Settings:
     minio_bucket_mlflow: str
 
     mlflow_tracking_uri: str
+    ltr_model_backend: str
 
     @property
     def pg_dsn(self) -> str:
@@ -44,6 +45,21 @@ class Settings:
 def _env(key: str, default: str) -> str:
     val = os.getenv(key)
     return val if val not in (None, "") else default
+
+
+def normalize_ltr_model_backend(value: str) -> str:
+    normalized = value.strip().lower()
+    aliases = {
+        "lgbm": "lgbm",
+        "lightgbm": "lgbm",
+        "xgb": "xgboost",
+        "xgboost": "xgboost",
+    }
+    if normalized not in aliases:
+        raise ValueError(
+            f"LTR_MODEL_BACKEND must be one of lgbm, lightgbm, xgb, xgboost; got {value!r}"
+        )
+    return aliases[normalized]
 
 
 def load() -> Settings:
@@ -67,4 +83,5 @@ def load() -> Settings:
         minio_bucket_data=_env("MINIO_BUCKET_DATA", "drusearch-data"),
         minio_bucket_mlflow=_env("MINIO_BUCKET_MLFLOW", "mlflow-artifacts"),
         mlflow_tracking_uri=_env("MLFLOW_TRACKING_URI", "http://mlflow:5000"),
+        ltr_model_backend=normalize_ltr_model_backend(_env("LTR_MODEL_BACKEND", "lgbm")),
     )

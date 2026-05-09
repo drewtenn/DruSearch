@@ -1,6 +1,6 @@
 # DruSearch
 
-DruSearch is a local-first e-commerce search stack. It combines lexical search, dense retrieval, click/event feedback, and a LightGBM Learning-to-Rank reranker so product results can improve from behavior.
+DruSearch is a local-first e-commerce search stack. It combines lexical search, dense retrieval, click/event feedback, and a configurable Learning-to-Rank trainer so product results can improve from behavior.
 
 The project is intentionally production-shaped, but runnable on one machine with Docker Compose.
 
@@ -30,7 +30,7 @@ Search flow:
 1. The API embeds the query with the Python embedder.
 2. OpenSearch retrieves BM25 and vector candidates.
 3. The API fuses candidates with RRF.
-4. The LightGBM reranker optionally reorders candidates.
+4. The served LTR reranker optionally reorders candidates.
 5. Impression/click/purchase events feed future training data.
 
 ## Quick Start
@@ -78,7 +78,8 @@ evaluation.
 | `make seed-databases` | Load product data into Postgres and OpenSearch. |
 | `make embed-vectors` | Add dense vectors for k-NN retrieval. |
 | `make simulate` | Generate example searches, clicks, and purchases. |
-| `make label-bge-teacher` | Distill offline BGE teacher scores into LTR training rows. |
+| `make label-bge-teacher` | Distill offline BGE teacher scores on the host/MPS path. |
+| `make label-bge-teacher-docker` | Distill offline BGE teacher scores in Docker with CPU PyTorch. |
 | `make host-pipeline-venv` | Create/update the local Python env used by host-run pipelines. |
 | `make label-bge-teacher-host` | Run BGE teacher scoring on the macOS host with Apple MPS/GPU. |
 | `make retrain-model` | Rebuild features, train, promote, and reload the ranker. |
@@ -90,28 +91,28 @@ evaluation.
 ## Offline BGE Teacher
 
 BGE cross-encoder scoring is an offline distillation step for the LightGBM
-ranker. The default Docker target is portable but uses the CPU-only PyTorch
-wheel in the pipelines image:
-
-```bash
-make label-bge-teacher
-```
-
-On Apple Silicon, run the BGE teacher on the macOS host so PyTorch can use
-Apple MPS/GPU while the databases and services still run in Docker:
+ranker. The default target runs on the macOS host so PyTorch can use Apple
+MPS/GPU while the databases and services still run in Docker:
 
 ```bash
 make up
 make ready
-make host-pipeline-venv
-make label-bge-teacher-host
+make label-bge-teacher
 ```
 
-`make label-bge-teacher-host` sources `.env`, overrides Docker service names
+`make label-bge-teacher` delegates to `make label-bge-teacher-host`, creates
+or updates `.venv-pipelines`, sources `.env`, overrides Docker service names
 such as `postgres` and `opensearch` to `localhost`, uses
 `.cache/huggingface` for model downloads, and defaults to
 `BGE_TEACHER_DEVICE=mps`. The target runs `make check-host-mps` first and
 fails early if host PyTorch cannot see Apple MPS.
+
+The Docker fallback is portable but uses the CPU-only PyTorch wheel in the
+pipelines image:
+
+```bash
+make label-bge-teacher-docker
+```
 
 After BGE labeling finishes, train and promote the reranker:
 
@@ -121,6 +122,12 @@ make promote-model
 make verify-promoted-model
 make reload-model
 ```
+
+BGE cross-encoder scoring distills labels for the LTR trainer. The trainer
+defaults to LightGBM, and the Go API can serve either promoted LightGBM or
+XGBoost artifacts. Set `LTR_MODEL_BACKEND=xgboost` before `make train-ltr`,
+`make eval`, `make promote-model`, and `make reload-model` to use the XGBoost
+path.
 
 ## API
 
@@ -147,7 +154,7 @@ curl -G http://localhost:8080/search \
   --data-urlencode "ranker=ltr"
 ```
 
-Supported values are `hybrid`/`rrf` for BM25+kNN retrieval order and `ltr` for the local LightGBM model. BGE cross-encoder scoring runs only offline through `make label-bge-teacher` or `make label-bge-teacher-host`, where it distills weak labels for LTR training. Set `DEFAULT_RANKER=hybrid|ltr` to choose the default mode.
+Supported values are `hybrid`/`rrf` for BM25+kNN retrieval order and `ltr` for the local served LTR model. LTR is the default; set `DEFAULT_RANKER=hybrid` or pass `ranker=hybrid` when you want retrieval-only ranking. BGE cross-encoder scoring runs only offline through `make label-bge-teacher` or `make label-bge-teacher-host`, where it distills weak labels for LTR training.
 
 ## Project Layout
 

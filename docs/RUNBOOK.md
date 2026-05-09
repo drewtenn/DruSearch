@@ -26,7 +26,7 @@ make simulate                              # ~8min for 200 users * 50 queries
 $(MAKE) -C . refresh-user-features         # per-user brand affinity -> Redis
 docker compose --profile jobs run --rm pipelines python -m pipelines.features.aggregates
 docker compose --profile jobs run --rm pipelines python -m pipelines.label.build_training_rows
-make train-ltr                             # LightGBM LambdaRank, MLflow run
+make train-ltr                             # configured LTR backend, MLflow run
 make promote-model                         # writes model.txt to shared volume
 make reload-model                          # api hot-reload
 ```
@@ -46,6 +46,12 @@ make reload-model
 ```
 
 Schedule the same sequence nightly via cron / Prefect / GitHub Actions.
+
+Set `LTR_MODEL_BACKEND=lgbm` or `LTR_MODEL_BACKEND=xgboost` to choose the
+training and serving backend. LightGBM promotion writes
+`models/ltr_reranker.txt`; XGBoost promotion writes
+`models/ltr_reranker.xgb.json`. Both write `models/ltr_reranker.json`
+metadata for API reload.
 
 ## Observability
 
@@ -87,7 +93,7 @@ docker compose restart embedder
 
 ### `LTR model not loaded at boot`
 
-Either no model file is on the shared volume, or `leaves` rejected it. Re-run `make promote-model`. If the rewrite for `version=v4 -> v3` ever stops working (LightGBM 5.x changes the tree block), fall back to pinning `lightgbm==4.5.0` in `pipelines/pyproject.toml`.
+Either no model file is on the shared volume, or the configured scorer rejected it. Re-run `make promote-model` with the same `LTR_MODEL_BACKEND` you trained. If the LightGBM rewrite for `version=v4 -> v3` ever stops working (LightGBM 5.x changes the tree block), fall back to pinning `lightgbm==4.5.0` in `pipelines/pyproject.toml`.
 
 ### `incorrect number of columns` from leaves
 
