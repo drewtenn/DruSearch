@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 
 from psycopg.errors import IndeterminateDatatype
@@ -136,6 +137,14 @@ def test_category_path_preserves_flat_amazon_hierarchy():
 
 def test_ingest_run_metadata_sql_casts_string_values():
     assert "%s::text" in amazon_reviews.UPDATE_RUN_OK_SQL
+
+
+def test_amazon_reviews_ingest_clears_derived_state_when_replacing_catalog():
+    source = " ".join(inspect.getsource(amazon_reviews.main).lower().split())
+
+    assert "truncate search_events" in source
+    assert "training_rows" in source
+    assert source.index("truncate search_events") < source.index("truncate products")
 
 
 def test_main_rolls_back_before_marking_ingest_failed(monkeypatch, tmp_path):

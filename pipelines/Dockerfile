@@ -16,7 +16,7 @@ ENV PIP_CERT=/etc/ssl/certs/ca-certificates.crt \
 
 RUN for i in 1 2 3; do \
       apt-get update && \
-      apt-get install -y --no-install-recommends build-essential libgomp1 && \
+      apt-get install -y --no-install-recommends build-essential git libgomp1 && \
       rm -rf /var/lib/apt/lists/* && break || sleep 5; \
     done
 

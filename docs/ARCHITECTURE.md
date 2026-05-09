@@ -4,13 +4,14 @@ DruSearch is a local-first e-commerce search stack. It combines BM25 lexical
 retrieval, dense vector retrieval, reciprocal-rank fusion, behavior logging,
 offline label distillation, and a Go-served LightGBM Learning-to-Rank model.
 
-Status: **local hybrid + personalized LTR stack is implemented.** The current
-catalog source is Amazon Reviews 2023 metadata, the default local target is
-10,000 products, vectors come from the `BAAI/bge-small-en-v1.5` embedder
-sidecar, and the served ranker uses the canonical v4 feature schema with 27
-features. Model promotion writes served artifacts under `models/`; commit those
-artifacts when another machine should serve the same trained ranker without
-rerunning BGE teacher scoring or training.
+Status: **local hybrid + personalized LTR stack is implemented.** The default
+catalog source is Amazon Shopping Queries / ESCI, preserving real query groups
+with graded `E`/`S`/`C`/`I` judgments for evaluation and training labels. The
+default local target is about 10,000 products, vectors come from the
+`BAAI/bge-small-en-v1.5` embedder sidecar, and the served ranker uses the
+canonical v4 feature schema with 27 features. Model promotion writes served
+artifacts under `models/`; commit those artifacts when another machine should
+serve the same trained ranker without rerunning BGE teacher scoring or training.
 
 The system is intentionally production-shaped, but it is still optimized for a
 single-machine Docker Compose demo. Current sizing is about 10k products and
@@ -58,7 +59,7 @@ retrieval, and larger synthetic catalogs is designed but not implemented.
        +------+---------------+--------------------------------------+
        | Python pipelines (pipelines/)                               |
        |                                                             |
-       | ingest.amazon_reviews -> index.bm25 -> embed.build_vectors  |
+       | ingest.esci -> index.bm25 -> embed.build_vectors            |
        | simulate.click_simulator -> /events                         |
        | features.aggregates -> Postgres product_features            |
        | features.user_aggs -> Redis feat:user:{id}                  |
@@ -90,7 +91,7 @@ model names are driven by `.env` and the defaults in `docker-compose.yml`.
 | Go API | `services/api-go` | Hot path for search, product lookup, events, admin, metrics | Stateless apart from in-process model handle and event buffer. |
 | Embedder sidecar | `services/embedder-py` | Encodes queries and product titles into 384-dim vectors | Default model is `BAAI/bge-small-en-v1.5`; same code path is used for indexing and querying. |
 | OpenSearch 2.19.1 | `opensearch` | BM25 and Lucene HNSW kNN over `products_v1` | Single shard, zero replicas, local security disabled. |
-| Postgres 16 | `postgres` | Product catalog, synthetic ESCI-style judgments, event log, training rows, product aggregates | Schema lives in `infra/postgres/001_init.sql`. |
+| Postgres 16 | `postgres` | Product catalog, ESCI graded judgments, event log, training rows, product aggregates | Schema lives in `infra/postgres/001_init.sql`. |
 | Redis 7 | `redis` | Online user feature store | `features.user_aggs` writes per-user brand affinity hashes. |
 | MLflow | `infra/mlflow` image | Experiment tracking and model registry | SQLite backend, MinIO artifact store. |
 | MinIO | `minio` | Local S3-compatible artifact storage | Used by MLflow and older/cacheable data flows. |
@@ -124,7 +125,8 @@ pipelines/pipelines/
 ├── evaluate/               # offline eval and API quality smoke checks
 ├── features/               # product aggregates and Redis user aggregates
 ├── index/bm25.py           # Postgres products -> OpenSearch products_v1
-├── ingest/amazon_reviews.py # Amazon Reviews 2023 metadata -> Postgres
+├── ingest/esci.py           # Amazon Shopping Queries ESCI -> Postgres
+├── ingest/amazon_reviews.py # Amazon Reviews 2023 metadata fallback -> Postgres
 ├── label/                  # training row build + offline BGE teacher labels
 ├── register/               # MLflow promotion gate + model artifact promotion
 ├── simulate/               # synthetic events
@@ -169,16 +171,16 @@ Current degradation behavior:
 
 ## Data Path
 
-The current demo data flow is:
+The default data flow is:
 
 ```text
-Amazon Reviews 2023 metadata
+Amazon Shopping Queries / ESCI parquet files
         |
         v
-pipelines.ingest.amazon_reviews
+pipelines.ingest.esci
         |
         +--> Postgres products
-        +--> synthetic exact judgments in esci_judgments
+        +--> graded query-product judgments in esci_judgments
         |
         v
 pipelines.index.bm25
@@ -193,14 +195,14 @@ pipelines.embed.build_vectors -> embedder /embed_batch
 OpenSearch products_v1 with title_vec
 ```
 
-`make seed-catalog` loads `AMAZON_REVIEWS_CATEGORY`
-(`Clothing_Shoes_and_Jewelry` by default) from Hugging Face or
-`AMAZON_REVIEWS_META_FILE`. The default target is
-`AMAZON_REVIEWS_TARGET_PRODUCTS=10000`. The ingest job derives a simple query
-for each product from brand and category path, writes it to `esci_judgments`,
-and labels the product as `E`. These judgments are used for offline evaluation
-and as authoritative labels when a training impression matches the same
-`(query, product_id)` pair.
+`make seed-catalog` runs `pipelines.ingest.esci`. It caches the Amazon Shopping
+Queries examples and products parquet files, filters to US `small_version`
+query-product examples, selects complete query groups until roughly
+`ESCI_TARGET_PRODUCTS=10000` unique products are covered, and writes the
+selected graded judgments to `esci_judgments`. These judgments are used for
+offline evaluation and as authoritative labels when a training impression
+matches the same `(query, product_id)` pair. `make seed-amazon-reviews` remains
+available for catalog-only demos that do not need dense relevance judgments.
 
 `pipelines.index.bm25` drops and recreates `products_v1` and bulk-loads product
 documents. `pipelines.embed.build_vectors` streams products through the same
@@ -270,7 +272,7 @@ Postgres tables:
 | Table | Purpose |
 |---|---|
 | `products` | Catalog source of truth, including `category_path` and raw metadata. |
-| `esci_judgments` | Offline evaluation/training judgments; currently synthetic exact labels from Amazon Reviews metadata. |
+| `esci_judgments` | Offline evaluation/training judgments from real ESCI query-product labels. |
 | `user_sessions` | Lightweight session metadata. |
 | `search_events` | Append-only impression, click, and purchase events. |
 | `training_rows` | One row per `(query_id, product_id)` impression with feature JSON, label, split, and optional user. |

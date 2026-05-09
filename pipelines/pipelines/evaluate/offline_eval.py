@@ -44,6 +44,7 @@ LTR_MODEL_BACKEND = normalize_ltr_model_backend(os.getenv("LTR_MODEL_BACKEND", "
 EVAL_QUERIES = int(os.getenv("EVAL_QUERIES", "500"))
 EVAL_K = int(os.getenv("EVAL_K", "10"))
 CAND_N = int(os.getenv("EVAL_CAND_N", "200"))
+EVAL_MIN_JUDGMENTS = int(os.getenv("EVAL_MIN_JUDGMENTS", "5"))
 
 
 # ---------------------------------------------------------------------------
@@ -88,7 +89,7 @@ def _load_catalog() -> Catalog:
 
 
 def _load_test_queries(n: int) -> list[tuple[int, str]]:
-    """Pick ESCI test-split queries that have at least 5 judgments in our catalog."""
+    """Pick ESCI test-split queries with usable positive judgments in our catalog."""
     with db.conn() as c, c.cursor() as cur:
         cur.execute(
             """
@@ -97,11 +98,12 @@ def _load_test_queries(n: int) -> list[tuple[int, str]]:
             JOIN products p ON p.product_id = j.product_id
             WHERE j.split = 'test'
             GROUP BY j.query_id, j.query
-            HAVING COUNT(*) >= 5
+            HAVING COUNT(*) >= %s
+               AND BOOL_OR(j.esci_label IN ('E', 'S', 'C'))
             ORDER BY j.query_id
             LIMIT %s
             """,
-            (n,),
+            (EVAL_MIN_JUDGMENTS, n),
         )
         return [(qid, q) for (qid, q, _n) in cur.fetchall()]
 

@@ -97,9 +97,12 @@ ready: ## Wait until the API says its dependencies are reachable
 	done; echo "TIMEOUT" && exit 1
 
 ##@ Phase 1 — load products and build basic text search
-.PHONY: seed-databases seed-catalog index-bm25
-seed-databases: seed-catalog index-bm25 ## Load sample products, then make them searchable
-seed-catalog: ## Put Amazon Reviews 2023 product metadata into Postgres
+.PHONY: seed-databases seed-catalog seed-esci seed-amazon-reviews index-bm25
+seed-databases: seed-catalog index-bm25 ## Load real ESCI products and judgments, then make them searchable
+seed-catalog: seed-esci ## Put real ESCI shopping-query products and judgments into Postgres
+seed-esci: ## Put Amazon Shopping Queries ESCI products and graded judgments into Postgres
+	$(COMPOSE) run --rm pipelines python -m pipelines.ingest.esci
+seed-amazon-reviews: ## Put Amazon Reviews 2023 product metadata into Postgres for catalog-only demos
 	$(COMPOSE) run --rm pipelines python -m pipelines.ingest.amazon_reviews
 index-bm25: ## Build the OpenSearch keyword index used by /search
 	$(COMPOSE) run --rm pipelines python -m pipelines.index.bm25
@@ -115,7 +118,7 @@ simulate: ## Generate fake searches, clicks, and purchases for training data
 	$(COMPOSE) run --rm pipelines python -m pipelines.simulate.click_simulator
 
 ##@ Phase 4 — teach and check a ranking model
-.PHONY: build-training-rows label-bge-teacher label-bge-teacher-docker host-pipeline-venv check-host-mps label-bge-teacher-host train-ltr retrain-model retrain-model-with-sim eval
+.PHONY: build-training-rows label-bge-teacher label-bge-teacher-docker host-pipeline-venv check-host-mps label-bge-teacher-host train-ltr retrain-model retrain-model-with-schema retrain-model-with-sim eval compare-ltr-backends
 build-training-rows: ## Convert logged behavior into examples the model can learn from
 	$(COMPOSE) run --rm pipelines python -m pipelines.label.build_training_rows
 label-bge-teacher: label-bge-teacher-host ## Score training rows with offline BGE on the host/MPS path
@@ -152,12 +155,38 @@ label-bge-teacher-host: host-pipeline-venv check-host-mps ## Run BGE teacher on 
 train-ltr: ## Train the configured LTR model backend to reorder search results
 	$(COMPOSE) run --rm pipelines python -m pipelines.train.lgbm_ranker
 retrain-model: refresh-product-features refresh-user-features build-training-rows label-bge-teacher train-ltr promote-model verify-promoted-model reload-model ## Retrain and reload LTR from existing events
+retrain-model-with-schema: ## Regenerate shared feature schema, then retrain and reload LTR
+	$(MAKE) regen-feature-schema
+	$(MAKE) check-feature-parity
+	$(MAKE) retrain-model
 retrain-model-with-sim: simulate retrain-model ## Generate fresh simulated events, then retrain and reload LTR
 eval: ## Measure ranking quality without changing the live API
 	$(COMPOSE) run --rm pipelines python -m pipelines.evaluate.offline_eval
+compare-ltr-backends: ## Train and evaluate LightGBM and XGBoost from the same current training rows
+	@set -euo pipefail; \
+	run_dir="reports/ltr-backends/$$(date +%Y%m%d-%H%M%S)"; \
+	mkdir -p "$$run_dir"; \
+	echo "Writing comparison logs to $$run_dir"; \
+	for backend in lgbm xgboost; do \
+		echo "==> training $$backend"; \
+		LTR_MODEL_BACKEND=$$backend $(MAKE) train-ltr 2>&1 | tee "$$run_dir/$$backend-train.log"; \
+		echo "==> evaluating $$backend"; \
+		LTR_MODEL_BACKEND=$$backend $(MAKE) eval 2>&1 | tee "$$run_dir/$$backend-eval.log"; \
+	done; \
+	{ \
+		echo "# LTR backend comparison"; \
+		echo; \
+		echo "Logs: $$run_dir"; \
+		for backend in lgbm xgboost; do \
+			echo; \
+			echo "## $$backend"; \
+			grep -hE "test NDCG|RRF  NDCG|LTR  NDCG|LTR vs RRF" "$$run_dir/$$backend-"*.log || true; \
+		done; \
+	} | tee "$$run_dir/summary.txt"; \
+	echo "Summary written to $$run_dir/summary.txt"
 
 ##@ Phase 5 — put the trained ranking model behind the API
-.PHONY: promote-model verify-promoted-model reload-model
+.PHONY: promote-model verify-promoted-model reload-model promote-and-reload gate-and-promote
 promote-model: ## Copy the chosen trained model where the API can read it
 	$(COMPOSE) --profile jobs run --rm -e LTR_MODEL_STAGE= pipelines python -m pipelines.register.promote
 verify-promoted-model: ## Fail early if the API model file has not been promoted
@@ -174,6 +203,13 @@ reload-model: ## Ask the running API to load the latest promoted model
 	fi; \
 	curl --fail-with-body -sS -X POST http://localhost:8080/admin/reload-model \
 		-H "Authorization: Bearer $$admin_token" | python3 -m json.tool
+promote-and-reload: ## Promote the selected model, verify it, and reload the API
+	$(MAKE) promote-model
+	$(MAKE) verify-promoted-model
+	$(MAKE) reload-model
+gate-and-promote: ## Run the promotion gate, then promote, verify, and reload
+	$(MAKE) gate-promote
+	$(MAKE) promote-and-reload
 
 ##@ Phase 6 — add simple per-user preferences
 .PHONY: refresh-product-features refresh-user-features

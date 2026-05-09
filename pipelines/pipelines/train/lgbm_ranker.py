@@ -68,7 +68,9 @@ def _build_matrix(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, np.ndarray]
 
 
 def _sorted_query_ids(df: pd.DataFrame) -> np.ndarray:
-    return df.sort_values("query_id")["query_id"].to_numpy()
+    qids = df.sort_values("query_id")["query_id"]
+    codes, _uniques = pd.factorize(qids, sort=False)
+    return codes.astype(np.uint32, copy=False)
 
 
 def _train_lgbm(

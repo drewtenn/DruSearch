@@ -210,6 +210,7 @@ def main() -> int:
 
         try:
             with c.cursor() as cur:
+                cur.execute("TRUNCATE search_events, training_rows, user_sessions RESTART IDENTITY")
                 cur.execute("TRUNCATE products RESTART IDENTITY CASCADE")
                 cur.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS category_path TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[]")
                 cur.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS raw_metadata JSONB NOT NULL DEFAULT '{}'::jsonb")

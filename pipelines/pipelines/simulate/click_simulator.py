@@ -125,6 +125,13 @@ def _post_event(client: httpx.Client, base_url: str, payload: dict) -> None:
         log.warning("event post failed type=%s err=%s", payload.get("event_type"), exc)
 
 
+def _search_params(query: str, user_id: str, session_id: str, k: int, ranker: str) -> dict:
+    params = {"q": query, "user_id": user_id, "session_id": session_id, "k": k}
+    if ranker:
+        params["ranker"] = ranker
+    return params
+
+
 def _simulate_user(
     user_idx: int,
     rng: random.Random,
@@ -132,6 +139,7 @@ def _simulate_user(
     base_url: str,
     queries_per_user: int,
     k: int,
+    ranker: str,
 ) -> UserStats:
     user_id = f"u_{user_idx:05d}"
     session_id = f"sess_{user_id}_{secrets.token_hex(4)}"
@@ -145,7 +153,7 @@ def _simulate_user(
             try:
                 resp = client.get(
                     f"{base_url}/search",
-                    params={"q": q, "user_id": user_id, "session_id": session_id, "k": k},
+                    params=_search_params(q, user_id, session_id, k, ranker),
                 )
                 resp.raise_for_status()
             except Exception as exc:
@@ -243,6 +251,7 @@ def main() -> int:
     p.add_argument("--k", type=int, default=int(os.getenv("SIM_K", "10")))
     p.add_argument("--workers", type=int, default=int(os.getenv("SIM_WORKERS", "16")))
     p.add_argument("--seed", type=int, default=int(os.getenv("SIM_SEED", "42")))
+    p.add_argument("--ranker", default=os.getenv("SIM_RANKER", "hybrid"))
     p.add_argument(
         "--base-url",
         default=os.getenv("SIM_BASE_URL", "http://api:8080"),
@@ -272,6 +281,7 @@ def main() -> int:
                 args.base_url,
                 args.queries_per_user,
                 args.k,
+                args.ranker,
             )
             for i in range(args.users)
         ]

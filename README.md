@@ -33,15 +33,18 @@ Search flow:
 4. The served LTR reranker optionally reorders candidates.
 5. Impression/click/purchase events feed future training data.
 
-## Quick Start
+## Main Workflows
+
+### Start Fresh
 
 ```bash
-cp .env.example .env
-make up
-make ready
-make seed-databases
-make embed-vectors
+make bootstrap-search
 ```
+
+That one command creates `.env` when needed, starts Docker, loads real Amazon
+Shopping Queries / ESCI products and graded relevance judgments, builds search
+indexes, simulates behavior, trains the default ranker, promotes it, and
+reloads the API.
 
 Then search:
 
@@ -51,83 +54,93 @@ curl -G http://localhost:8080/search \
   --data-urlencode "k=5"
 ```
 
-`make ready` only checks service health. A fresh stack still needs `make seed-databases` before `/search` has products to return.
+### Use A New Feature Or Label Change
 
-## Full Demo Loop
-
-To run the complete local workflow with data, vectors, simulated behavior, feature aggregation, model training, promotion, and API reload:
+After adding or changing an LTR feature, label rule, or teacher-label input,
+run one target:
 
 ```bash
-make bootstrap-search
+make retrain-model
 ```
 
-After that, `/search` should return `mode` values such as `hybrid+ltr` when the model and vectors are available.
+That rebuilds product and user features, rebuilds training rows, labels them
+with the offline BGE teacher, trains, promotes, verifies, and reloads the API.
 
-The promoted LightGBM model is written to `models/ltr_reranker.txt` plus
-`models/ltr_reranker.json`. Commit those files when you want another machine
-to use the trained ranker without rerunning BGE teacher scoring, training, or
-evaluation.
+If the shared feature schema changed, use this instead:
 
-## Common Commands
+```bash
+make retrain-model-with-schema
+```
+
+If you also want fresh simulated behavior before retraining:
+
+```bash
+make retrain-model-with-sim
+```
+
+### Compare Rankers
+
+```bash
+make compare-ltr-backends
+```
+
+Comparison logs and a summary are written under
+`reports/ltr-backends/<timestamp>/`, and evaluation runs are logged to MLflow
+at `http://localhost:5000`.
+
+### Promote A Manually Trained Model
+
+If you trained or evaluated manually and want the API to use that model:
+
+```bash
+make promote-and-reload
+```
+
+To require the non-regression gate first:
+
+```bash
+make gate-and-promote
+```
+
+LightGBM is the default backend. To retrain and serve XGBoost instead:
+
+```bash
+LTR_MODEL_BACKEND=xgboost make retrain-model
+```
+
+Use the same prefix with `make promote-and-reload` when you want that workflow
+to use XGBoost. `make compare-ltr-backends` always runs both backends.
+
+Promotion writes the model artifact plus metadata into `models/`:
+
+| Backend | Model artifact | Metadata |
+|---|---|---|
+| LightGBM | `models/ltr_reranker.txt` | `models/ltr_reranker.json` |
+| XGBoost | `models/ltr_reranker.xgb.json` | `models/ltr_reranker.json` |
+
+The API reads `models/ltr_reranker.json` when it reloads and chooses the
+matching scorer. Commit the model artifact and metadata when you want another
+machine to serve the same trained ranker without retraining.
+
+## Command Reference
 
 | Command | Purpose |
 |---|---|
-| `make up` | Start the local Docker Compose stack. |
-| `make down` | Stop the stack. |
+| `make up` / `make down` | Start or stop the local Docker Compose stack. |
 | `make ready` | Wait for API dependency readiness. |
-| `make seed-databases` | Load product data into Postgres and OpenSearch. |
-| `make embed-vectors` | Add dense vectors for k-NN retrieval. |
-| `make simulate` | Generate example searches, clicks, and purchases. |
-| `make label-bge-teacher` | Distill offline BGE teacher scores on the host/MPS path. |
-| `make label-bge-teacher-docker` | Distill offline BGE teacher scores in Docker with CPU PyTorch. |
-| `make host-pipeline-venv` | Create/update the local Python env used by host-run pipelines. |
-| `make label-bge-teacher-host` | Run BGE teacher scoring on the macOS host with Apple MPS/GPU. |
-| `make retrain-model` | Rebuild features, train, promote, and reload the ranker. |
-| `make use-checked-in-model` | Restart the API and load the model checked into `models/`. |
+| `make bootstrap-search` | Run the complete initial local demo workflow. |
+| `make seed-catalog` | Load real ESCI shopping-query products and judgments. |
+| `make seed-amazon-reviews` | Load Amazon Reviews metadata for catalog-only demos. |
+| `make retrain-model` | Rebuild labels/features, train, promote, verify, and reload. |
+| `make retrain-model-with-schema` | Regenerate shared feature schema, then retrain and reload. |
+| `make retrain-model-with-sim` | Generate fresh simulated events, then retrain and reload. |
+| `make train-ltr` / `make eval` | Train or evaluate the configured LTR backend. |
+| `make compare-ltr-backends` | Train and evaluate LightGBM and XGBoost back-to-back. |
+| `make promote-and-reload` | Copy the selected model to `models/`, verify it, and load it in the API. |
+| `make gate-and-promote` | Run the promotion gate, then promote and reload. |
+| `make use-checked-in-model` | Restart the API and load the checked-in model artifact. |
 | `make metrics` | Show DruSearch Prometheus metrics. |
-| `make test-go` | Run Go tests. |
-| `make test-py` | Run Python tests. |
-
-## Offline BGE Teacher
-
-BGE cross-encoder scoring is an offline distillation step for the LightGBM
-ranker. The default target runs on the macOS host so PyTorch can use Apple
-MPS/GPU while the databases and services still run in Docker:
-
-```bash
-make up
-make ready
-make label-bge-teacher
-```
-
-`make label-bge-teacher` delegates to `make label-bge-teacher-host`, creates
-or updates `.venv-pipelines`, sources `.env`, overrides Docker service names
-such as `postgres` and `opensearch` to `localhost`, uses
-`.cache/huggingface` for model downloads, and defaults to
-`BGE_TEACHER_DEVICE=mps`. The target runs `make check-host-mps` first and
-fails early if host PyTorch cannot see Apple MPS.
-
-The Docker fallback is portable but uses the CPU-only PyTorch wheel in the
-pipelines image:
-
-```bash
-make label-bge-teacher-docker
-```
-
-After BGE labeling finishes, train and promote the reranker:
-
-```bash
-make train-ltr
-make promote-model
-make verify-promoted-model
-make reload-model
-```
-
-BGE cross-encoder scoring distills labels for the LTR trainer. The trainer
-defaults to LightGBM, and the Go API can serve either promoted LightGBM or
-XGBoost artifacts. Set `LTR_MODEL_BACKEND=xgboost` before `make train-ltr`,
-`make eval`, `make promote-model`, and `make reload-model` to use the XGBoost
-path.
+| `make test-go` / `make test-py` | Run Go or Python tests. |
 
 ## API
 
@@ -154,7 +167,7 @@ curl -G http://localhost:8080/search \
   --data-urlencode "ranker=ltr"
 ```
 
-Supported values are `hybrid`/`rrf` for BM25+kNN retrieval order and `ltr` for the local served LTR model. LTR is the default; set `DEFAULT_RANKER=hybrid` or pass `ranker=hybrid` when you want retrieval-only ranking. BGE cross-encoder scoring runs only offline through `make label-bge-teacher` or `make label-bge-teacher-host`, where it distills weak labels for LTR training.
+Supported values are `hybrid`/`rrf` for BM25+kNN retrieval order and `ltr` for the local served LTR model. LTR is the default; set `DEFAULT_RANKER=hybrid` or pass `ranker=hybrid` when you want retrieval-only ranking. BGE cross-encoder scoring runs offline during the retrain workflows.
 
 ## Project Layout
 

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import numpy as np
+import pandas as pd
 import pytest
 
 from pipelines.evaluate.offline_eval import _version_backend
@@ -36,6 +38,19 @@ def test_promote_target_file_for_backend(monkeypatch, tmp_path, backend, want_na
 def test_artifact_path_rejects_unknown_backend():
     with pytest.raises(ValueError, match="unsupported LTR model backend"):
         lgbm_ranker._artifact_path_for_backend("catboost")
+
+
+def test_sorted_query_ids_are_numeric_for_xgboost_ranker():
+    df = pd.DataFrame(
+        {
+            "query_id": ["b-query", "a-query", "b-query", "c-query", "a-query"],
+        }
+    )
+
+    qids = lgbm_ranker._sorted_query_ids(df)
+
+    assert qids.dtype == np.uint32
+    assert qids.tolist() == [0, 0, 1, 1, 2]
 
 
 def test_version_backend_reads_logged_mlflow_param():

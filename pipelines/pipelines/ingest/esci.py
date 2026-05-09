@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 import random
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
@@ -45,6 +46,12 @@ PRODUCT_COLUMNS = [
     "product_brand",
     "product_color",
 ]
+
+
+@dataclass(frozen=True)
+class Selection:
+    query_ids: set[int]
+    product_ids: set[str]
 
 
 def _missing_object(exc: Exception) -> bool:
@@ -93,20 +100,22 @@ def _cached_path(name: str) -> Path:
     return path
 
 
-def _select_products(examples: pd.DataFrame, target: int, seed: int) -> set[str]:
-    """Walk shuffled queries; accumulate their products until set size >= target."""
+def _select_products(examples: pd.DataFrame, target: int, seed: int) -> Selection:
+    """Walk shuffled queries and keep complete query groups until the product target."""
     rng = random.Random(seed)
     by_query = (
         examples.groupby("query_id")["product_id"].apply(lambda s: list(set(s))).to_dict()
     )
     qids = list(by_query.keys())
     rng.shuffle(qids)
-    chosen: set[str] = set()
+    chosen_queries: set[int] = set()
+    chosen_products: set[str] = set()
     for q in qids:
-        chosen.update(by_query[q])
-        if len(chosen) >= target:
+        chosen_queries.add(int(q))
+        chosen_products.update(by_query[q])
+        if len(chosen_products) >= target:
             break
-    return chosen
+    return Selection(query_ids=chosen_queries, product_ids=chosen_products)
 
 
 def _iter_rows(df: pd.DataFrame) -> Iterable[tuple]:
@@ -163,7 +172,7 @@ def main() -> int:
     )
 
     selected = _select_products(examples, TARGET_PRODUCTS, SEED)
-    examples = examples[examples["product_id"].isin(selected)].reset_index(drop=True)
+    examples = examples[examples["query_id"].isin(selected.query_ids)].reset_index(drop=True)
     log.info(
         "after subset rows=%d products=%d queries=%d",
         len(examples),
@@ -171,7 +180,7 @@ def main() -> int:
         examples["query_id"].nunique(),
     )
 
-    products = _filtered_products_from_parquet(_cached_path(PRODUCTS_FILE), selected)
+    products = _filtered_products_from_parquet(_cached_path(PRODUCTS_FILE), selected.product_ids)
     log.info("products filtered rows=%d", len(products))
 
     if len(products) == 0:
@@ -189,6 +198,7 @@ def main() -> int:
 
         try:
             with c.cursor() as cur:
+                cur.execute("TRUNCATE search_events, training_rows, user_sessions RESTART IDENTITY")
                 cur.execute("TRUNCATE products RESTART IDENTITY CASCADE")
                 with cur.copy(
                     "COPY products (product_id, locale, title, description, bullet_points, brand, color) FROM STDIN"
