@@ -8,8 +8,9 @@ import (
 )
 
 type Config struct {
-	APIHost string
-	APIPort int
+	APIHost    string
+	APIPort    int
+	APITimeout time.Duration
 
 	PostgresURL string
 
@@ -21,6 +22,9 @@ type Config struct {
 	EmbedderURL     string
 	EmbedderTimeout time.Duration
 
+	DefaultRanker          string
+	NeuralRerankCandidates int
+
 	AdminToken string
 
 	LTRModelDir  string
@@ -31,15 +35,20 @@ func FromEnv() (Config, error) {
 	c := Config{
 		APIHost:         getenv("API_HOST", "0.0.0.0"),
 		APIPort:         mustAtoi(getenv("API_PORT", "8080")),
+		APITimeout:      time.Duration(mustAtoi(getenv("API_TIMEOUT_SECONDS", "30"))) * time.Second,
 		PostgresURL:     buildPostgresURL(),
 		RedisAddr:       fmt.Sprintf("%s:%s", getenv("REDIS_HOST", "redis"), getenv("REDIS_PORT", "6379")),
 		OpenSearchURL:   fmt.Sprintf("%s://%s:%s", getenv("OPENSEARCH_SCHEME", "http"), getenv("OPENSEARCH_HOST", "opensearch"), getenv("OPENSEARCH_PORT", "9200")),
 		OpenSearchIndex: getenv("OPENSEARCH_INDEX", "products_v1"),
 		EmbedderURL:     fmt.Sprintf("http://%s:%s", getenv("EMBEDDER_HOST", "embedder"), getenv("EMBEDDER_PORT", "8000")),
 		EmbedderTimeout: 2 * time.Second,
-		AdminToken:      os.Getenv("ADMIN_TOKEN"),
-		LTRModelDir:     getenv("LTR_MODEL_DIR", "/var/lib/drusearch/models"),
-		LTRModelName:    getenv("LTR_MODEL_NAME", "ltr_reranker"),
+		DefaultRanker:   getenv("DEFAULT_RANKER", "hybrid"),
+		NeuralRerankCandidates: mustAtoi(getenv(
+			"NEURAL_RERANK_CANDIDATES", "50",
+		)),
+		AdminToken:   os.Getenv("ADMIN_TOKEN"),
+		LTRModelDir:  getenv("LTR_MODEL_DIR", "/var/lib/drusearch/models"),
+		LTRModelName: getenv("LTR_MODEL_NAME", "ltr_reranker"),
 	}
 	return c, nil
 }

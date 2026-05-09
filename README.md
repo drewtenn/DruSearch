@@ -94,6 +94,17 @@ The API runs at `http://localhost:8080`.
 
 Admin endpoints require `ADMIN_TOKEN` in `.env`.
 
+`/search` accepts an optional `ranker` query parameter:
+
+```bash
+curl -G http://localhost:8080/search \
+  --data-urlencode "q=nike shoes that are low cost" \
+  --data-urlencode "k=10" \
+  --data-urlencode "ranker=bge"
+```
+
+Supported values are `hybrid`/`rrf` for BM25+kNN retrieval order, `ltr` for the local LightGBM model, and `bge` for BAAI/bge-reranker-v2-m3 reranking over retrieved candidates. Set `DEFAULT_RANKER=hybrid|ltr|bge` to choose the default mode.
+
 ## Project Layout
 
 | Path | Purpose |

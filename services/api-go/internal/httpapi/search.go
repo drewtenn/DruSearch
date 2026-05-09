@@ -1,10 +1,13 @@
 package httpapi
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"math"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -15,6 +18,7 @@ import (
 	"github.com/drewtenn/drusearch/services/api-go/internal/embedder"
 	"github.com/drewtenn/drusearch/services/api-go/internal/eventbus"
 	"github.com/drewtenn/drusearch/services/api-go/internal/features"
+	"github.com/drewtenn/drusearch/services/api-go/internal/neuralrerank"
 	"github.com/drewtenn/drusearch/services/api-go/internal/obs"
 	"github.com/drewtenn/drusearch/services/api-go/internal/rerank"
 	"github.com/drewtenn/drusearch/services/api-go/internal/retrieval"
@@ -40,6 +44,8 @@ type explain struct {
 	RRF      float64 `json:"rrf"`
 	LTR      float64 `json:"ltr,omitempty"`
 	LTRRank  int     `json:"ltr_rank,omitempty"`
+	BGE      float64 `json:"bge,omitempty"`
+	BGERank  int     `json:"bge_rank,omitempty"`
 }
 
 type SearchResponse struct {
@@ -63,6 +69,11 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	if q == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "missing query parameter q"})
+		return
+	}
+	ranker, err := rankerFromRequest(r.URL.Query().Get("ranker"), s.DefaultRanker)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 		return
 	}
 
@@ -111,15 +122,34 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 	}
 	obs.CandidatesPerRequest.Observe(float64(len(hits)))
 
-	userStart := time.Now()
-	userFeats := features.LoadUserFeatures(r.Context(), s.Stores.RDB, userID)
-	obs.StageLatency.WithLabelValues("user_features").Observe(time.Since(userStart).Seconds())
-
 	rerankStart := time.Now()
-	scored, modelVersion, used := s.maybeRerank(q, hits, userFeats)
+	var (
+		scored       []rerank.ScoredHit
+		modelVersion string
+		usedRanker   rankerMode
+	)
+	switch ranker {
+	case rankerLTR:
+		userStart := time.Now()
+		userFeats := features.LoadUserFeatures(r.Context(), s.Stores.RDB, userID)
+		obs.StageLatency.WithLabelValues("user_features").Observe(time.Since(userStart).Seconds())
+		var used bool
+		scored, modelVersion, used = s.maybeRerank(q, hits, userFeats)
+		if used {
+			usedRanker = rankerLTR
+		}
+	case rankerBGE:
+		var used bool
+		scored, modelVersion, used = s.maybeBGERerank(r.Context(), q, hits, k)
+		if used {
+			usedRanker = rankerBGE
+		}
+	default:
+		scored = wrapHits(hits)
+	}
 	obs.StageLatency.WithLabelValues("rerank").Observe(time.Since(rerankStart).Seconds())
-	if used {
-		mode = mode + "+ltr"
+	if usedRanker != "" {
+		mode = mode + "+" + string(usedRanker)
 	}
 
 	if len(scored) > k {
@@ -132,8 +162,10 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 		// pick the headline score: LTR if applied, else RRF/BM25
 		score := sh.RRF
 		switch {
-		case used:
+		case usedRanker == rankerLTR:
 			score = sh.LTR
+		case usedRanker == rankerBGE:
+			score = sh.BGE
 		case mode == "bm25":
 			score = sh.BM25
 		}
@@ -154,6 +186,8 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 				RRF:      sh.RRF,
 				LTR:      sh.LTR,
 				LTRRank:  sh.LTRRank,
+				BGE:      sh.BGE,
+				BGERank:  sh.BGERank,
 			},
 		})
 
@@ -164,8 +198,11 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 				"knn":  sh.KNN,
 				"rrf":  sh.RRF,
 			}
-			if used {
+			if usedRanker == rankerLTR {
 				scoreMap["ltr"] = sh.LTR
+			}
+			if usedRanker == rankerBGE {
+				scoreMap["bge"] = sh.BGE
 			}
 			s.Bus.Submit(eventbus.Event{
 				Type:      "impression",
@@ -200,30 +237,78 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 // re-sorted) scored hits, the loaded model version label, and whether
 // re-ranking actually happened.
 func (s *Server) maybeRerank(q string, hits []retrieval.Hit, user *features.UserFeatures) ([]rerank.ScoredHit, string, bool) {
-	wrap := func(h []retrieval.Hit) []rerank.ScoredHit {
-		out := make([]rerank.ScoredHit, len(h))
-		for i, x := range h {
-			out[i] = rerank.ScoredHit{Hit: x}
-		}
-		return out
-	}
 	if s.Reranker == nil || s.Vocab == nil {
-		return wrap(hits), "", false
+		return wrapHits(hits), "", false
 	}
 	loaded := s.Reranker.Get()
 	if loaded == nil {
-		return wrap(hits), "", false
+		return wrapHits(hits), "", false
 	}
 	scored, err := rerank.Apply(loaded, q, hits, s.Vocab, user)
 	if err != nil {
 		s.Logger.Warn("rerank failed; falling back to retrieval order", zap.Error(err))
-		return wrap(hits), "", false
+		return wrapHits(hits), "", false
 	}
 	version := ""
 	if v, ok := loaded.Meta["version"]; ok {
 		version = toString(v)
 	}
 	return scored, version, true
+}
+
+func (s *Server) maybeBGERerank(ctx context.Context, q string, hits []retrieval.Hit, k int) ([]rerank.ScoredHit, string, bool) {
+	if s.Neural == nil || len(hits) == 0 {
+		return wrapHits(hits), "", false
+	}
+	limit := s.NeuralRerankCandidates
+	if limit <= 0 {
+		limit = 50
+	}
+	if k > limit {
+		limit = k
+	}
+	if limit > len(hits) {
+		limit = len(hits)
+	}
+	docs := make([]neuralrerank.Document, 0, limit)
+	for _, h := range hits[:limit] {
+		docs = append(docs, neuralrerank.Document{
+			ID:   h.ProductID,
+			Text: neuralrerank.ProductText(h),
+		})
+	}
+	scores, model, err := s.Neural.Rerank(ctx, q, docs)
+	if err != nil {
+		s.Logger.Warn("BGE rerank failed; falling back to retrieval order", zap.Error(err))
+		return wrapHits(hits), "", false
+	}
+	byID := make(map[string]float64, len(scores))
+	for _, sc := range scores {
+		byID[sc.ID] = sc.Score
+	}
+	out := wrapHits(hits)
+	for i := 0; i < limit; i++ {
+		score, ok := byID[out[i].ProductID]
+		if !ok {
+			score = math.Inf(-1)
+		}
+		out[i].BGE = score
+	}
+	sort.SliceStable(out[:limit], func(i, j int) bool {
+		return out[i].BGE > out[j].BGE
+	})
+	for i := 0; i < limit; i++ {
+		out[i].BGERank = i + 1
+	}
+	return out, model, true
+}
+
+func wrapHits(hits []retrieval.Hit) []rerank.ScoredHit {
+	out := make([]rerank.ScoredHit, len(hits))
+	for i, x := range hits {
+		out[i] = rerank.ScoredHit{Hit: x}
+	}
+	return out
 }
 
 func toString(v any) string {

@@ -12,6 +12,7 @@ import (
 	"github.com/drewtenn/drusearch/services/api-go/internal/embedder"
 	"github.com/drewtenn/drusearch/services/api-go/internal/eventbus"
 	"github.com/drewtenn/drusearch/services/api-go/internal/features"
+	"github.com/drewtenn/drusearch/services/api-go/internal/neuralrerank"
 	"github.com/drewtenn/drusearch/services/api-go/internal/products"
 	"github.com/drewtenn/drusearch/services/api-go/internal/rerank"
 	"github.com/drewtenn/drusearch/services/api-go/internal/retrieval"
@@ -26,8 +27,13 @@ type Server struct {
 	Products   *products.Store
 	Bus        *eventbus.Bus
 	Reranker   *rerank.Reranker
+	Neural     *neuralrerank.Client
 	Vocab      *features.Vocab
 	AdminToken string
+
+	DefaultRanker          string
+	NeuralRerankCandidates int
+	RequestTimeout         time.Duration
 }
 
 func (s *Server) Routes() http.Handler {
@@ -35,7 +41,11 @@ func (s *Server) Routes() http.Handler {
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(5 * time.Second))
+	timeout := s.RequestTimeout
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	r.Use(middleware.Timeout(timeout))
 
 	r.Get("/healthz", s.healthz)
 	r.Get("/readyz", s.readyz)

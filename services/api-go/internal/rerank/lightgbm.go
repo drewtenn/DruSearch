@@ -20,19 +20,19 @@ import (
 )
 
 type Loaded struct {
-	Ensemble  *leaves.Ensemble
-	Path      string
-	Meta      map[string]any
-	LoadedAt  time.Time
+	Ensemble *leaves.Ensemble
+	Path     string
+	Meta     map[string]any
+	LoadedAt time.Time
 }
 
 // Reranker holds the currently-loaded ensemble. Callers Read with Get
 // (cheap atomic load); a successful Reload replaces it atomically. A nil
 // Get result means "no model loaded" — callers should fall back to RRF.
 type Reranker struct {
-	current  atomic.Pointer[Loaded]
-	dir      string
-	name     string
+	current atomic.Pointer[Loaded]
+	dir     string
+	name    string
 }
 
 func New(dir, name string) *Reranker {
@@ -117,6 +117,8 @@ type ScoredHit struct {
 	retrieval.Hit
 	LTR     float64
 	LTRRank int
+	BGE     float64
+	BGERank int
 }
 
 func Apply(l *Loaded, query string, hits []retrieval.Hit, vocab *features.Vocab, user *features.UserFeatures) ([]ScoredHit, error) {
