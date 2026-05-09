@@ -15,4 +15,7 @@ def test_bm25_query_uses_derived_gender_for_gendered_queries():
 def test_bm25_query_keeps_plain_query_without_gender_intent():
     query = _bm25_query("nike running shoes")
 
-    assert "multi_match" in query
+    bool_query = query["bool"]
+    assert "filter" not in bool_query
+    assert bool_query["must"][0]["dis_max"]["queries"]
+    assert bool_query["should"][0]["match"]["brand.text"]["fuzziness"] == "AUTO"

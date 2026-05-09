@@ -3,46 +3,58 @@
 
 package features
 
-const SchemaVersion = "v7"
+const SchemaVersion = "v8"
 
 const (
 	GenBm25Score = 0
 	GenBm25Rank = 1
-	GenKnnScore = 2
-	GenKnnRank = 3
-	GenRrfScore = 4
-	GenPopularityPrior = 5
-	GenPriceLogCents = 6
-	GenTitleLengthTokens = 7
-	GenQueryLengthTokens = 8
-	GenQueryHasBrand = 9
-	GenQueryHasColor = 10
-	GenQueryHasCategoryToken = 11
-	GenQueryHasSizePattern = 12
-	GenQueryGenderIntent = 13
-	GenProductGender = 14
-	GenGenderIntentMatch = 15
-	GenGenderIntentMismatch = 16
-	GenProductBrandMatch = 17
-	GenProductBrandTokenOverlap = 18
-	GenProductColorMatch = 19
-	GenTitleQueryTokenCoverage = 20
-	GenCategoryQueryTokenCoverage = 21
-	GenProductCategoryTokenOverlap = 22
-	GenTitleExactQueryMatch = 23
-	GenUserBrandAffinity = 24
-	GenQueryAffordabilityIntent = 25
-	GenAffordabilityPriceScore = 26
-	GenBrandFamilyMatch = 27
-	GenSubbrandTitleMatch = 28
+	GenTitleBm25Score = 2
+	GenCategoryPathBm25Score = 3
+	GenCategoryBm25Score = 4
+	GenBulletsBm25Score = 5
+	GenDescriptionBm25Score = 6
+	GenBrandBm25Score = 7
+	GenKnnScore = 8
+	GenKnnRank = 9
+	GenRrfScore = 10
+	GenPopularityPrior = 11
+	GenPriceLogCents = 12
+	GenTitleLengthTokens = 13
+	GenQueryLengthTokens = 14
+	GenQueryHasBrand = 15
+	GenQueryHasColor = 16
+	GenQueryHasCategoryToken = 17
+	GenQueryHasSizePattern = 18
+	GenQueryGenderIntent = 19
+	GenProductGender = 20
+	GenGenderIntentMatch = 21
+	GenGenderIntentMismatch = 22
+	GenProductBrandMatch = 23
+	GenProductBrandTokenOverlap = 24
+	GenProductColorMatch = 25
+	GenTitleQueryTokenCoverage = 26
+	GenCategoryQueryTokenCoverage = 27
+	GenProductCategoryTokenOverlap = 28
+	GenTitleExactQueryMatch = 29
+	GenUserBrandAffinity = 30
+	GenQueryAffordabilityIntent = 31
+	GenAffordabilityPriceScore = 32
+	GenBrandFamilyMatch = 33
+	GenSubbrandTitleMatch = 34
 
-	GenNumFeatures = 29
+	GenNumFeatures = 35
 )
 
 // GenNames is the ordered feature-name list aligned with the indices above.
 var GenNames = [...]string{
 	"bm25_score",
 	"bm25_rank",
+	"title_bm25_score",
+	"category_path_bm25_score",
+	"category_bm25_score",
+	"bullets_bm25_score",
+	"description_bm25_score",
+	"brand_bm25_score",
 	"knn_score",
 	"knn_rank",
 	"rrf_score",

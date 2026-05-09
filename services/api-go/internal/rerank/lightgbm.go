@@ -80,6 +80,9 @@ func (r *Reranker) Reload() (*Loaded, error) {
 		if _, err := os.Stat(path); err != nil {
 			return nil, err
 		}
+		if err := validateFeatureSchema(meta); err != nil {
+			return nil, err
+		}
 		ens, err = leaves.LGEnsembleFromFile(path, false)
 		if err != nil {
 			return nil, fmt.Errorf("leaves load %s: %w", path, err)
@@ -88,6 +91,9 @@ func (r *Reranker) Reload() (*Loaded, error) {
 	case "xgboost":
 		path = r.xgboostModelPath()
 		if _, err := os.Stat(path); err != nil {
+			return nil, err
+		}
+		if err := validateFeatureSchema(meta); err != nil {
 			return nil, err
 		}
 		scorer, err = LoadXGBoost(path)
@@ -119,6 +125,17 @@ func (r *Reranker) Reload() (*Loaded, error) {
 	}
 	r.current.Store(loaded)
 	return loaded, nil
+}
+
+func validateFeatureSchema(meta map[string]any) error {
+	version, _ := meta["feature_schema_version"].(string)
+	if version == "" {
+		return fmt.Errorf("model metadata missing feature_schema_version; serving schema is %s", features.SchemaVersion)
+	}
+	if version != features.SchemaVersion {
+		return fmt.Errorf("model feature_schema_version %s != serving schema %s", version, features.SchemaVersion)
+	}
+	return nil
 }
 
 func (r *Reranker) Get() *Loaded {

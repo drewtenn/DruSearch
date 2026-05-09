@@ -24,20 +24,26 @@ func New(c *opensearch.Client, index string) *Engine {
 }
 
 type Hit struct {
-	ProductID       string   `json:"product_id"`
-	Title           string   `json:"title"`
-	Brand           string   `json:"brand"`
-	Color           string   `json:"color"`
-	Category        string   `json:"category"`
-	CategoryPath    []string `json:"category_path"`
-	DerivedGender   string   `json:"derived_gender"`
-	PriceCents      int      `json:"price_cents"`
-	PopularityPrior float64  `json:"popularity_prior"`
-	BM25            float64  `json:"bm25"`
-	BM25Rank        int      `json:"bm25_rank"`
-	KNN             float64  `json:"knn"`
-	KNNRank         int      `json:"knn_rank"`
-	RRF             float64  `json:"rrf"`
+	ProductID        string   `json:"product_id"`
+	Title            string   `json:"title"`
+	Brand            string   `json:"brand"`
+	Color            string   `json:"color"`
+	Category         string   `json:"category"`
+	CategoryPath     []string `json:"category_path"`
+	DerivedGender    string   `json:"derived_gender"`
+	PriceCents       int      `json:"price_cents"`
+	PopularityPrior  float64  `json:"popularity_prior"`
+	BM25             float64  `json:"bm25"`
+	BM25Rank         int      `json:"bm25_rank"`
+	KNN              float64  `json:"knn"`
+	KNNRank          int      `json:"knn_rank"`
+	RRF              float64  `json:"rrf"`
+	TitleBM25        float64  `json:"title_bm25"`
+	CategoryPathBM25 float64  `json:"category_path_bm25"`
+	CategoryBM25     float64  `json:"category_bm25"`
+	BulletsBM25      float64  `json:"bullets_bm25"`
+	DescriptionBM25  float64  `json:"description_bm25"`
+	BrandBM25        float64  `json:"brand_bm25"`
 }
 
 type osSource struct {
@@ -53,9 +59,23 @@ type osSource struct {
 }
 
 type rawHit struct {
-	ID     string
-	Score  float64
-	Source osSource
+	ID            string
+	Score         float64
+	Source        osSource
+	MatchedScores map[string]float64
+}
+
+var fieldScoreQueryNames = []string{
+	"bm25_title",
+	"bm25_category_path",
+	"bm25_category",
+	"bm25_bullets",
+	"bm25_description",
+	"bm25_brand",
+}
+
+func fieldScoreNames() []string {
+	return fieldScoreQueryNames
 }
 
 func (e *Engine) doSearch(ctx context.Context, body []byte) ([]rawHit, error) {
@@ -76,9 +96,10 @@ func (e *Engine) doSearch(ctx context.Context, body []byte) ([]rawHit, error) {
 	var raw struct {
 		Hits struct {
 			Hits []struct {
-				ID     string          `json:"_id"`
-				Score  float64         `json:"_score"`
-				Source json.RawMessage `json:"_source"`
+				ID             string          `json:"_id"`
+				Score          float64         `json:"_score"`
+				Source         json.RawMessage `json:"_source"`
+				MatchedQueries json.RawMessage `json:"matched_queries"`
 			} `json:"hits"`
 		} `json:"hits"`
 	}
@@ -94,9 +115,33 @@ func (e *Engine) doSearch(ctx context.Context, body []byte) ([]rawHit, error) {
 		if src.ProductID == "" {
 			src.ProductID = h.ID
 		}
-		out = append(out, rawHit{ID: h.ID, Score: h.Score, Source: src})
+		out = append(out, rawHit{
+			ID:            h.ID,
+			Score:         h.Score,
+			Source:        src,
+			MatchedScores: parseMatchedQueryScores(h.MatchedQueries),
+		})
 	}
 	return out, nil
+}
+
+func parseMatchedQueryScores(raw json.RawMessage) map[string]float64 {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	var scores map[string]float64
+	if err := json.Unmarshal(raw, &scores); err == nil {
+		return scores
+	}
+	var names []string
+	if err := json.Unmarshal(raw, &names); err == nil {
+		out := make(map[string]float64, len(names))
+		for _, name := range names {
+			out[name] = 1.0
+		}
+		return out
+	}
+	return nil
 }
 
 func sourceFields() []string {
@@ -104,20 +149,62 @@ func sourceFields() []string {
 }
 
 func buildBM25Body(query string, k int) ([]byte, error) {
-	baseQuery := map[string]any{
-		"multi_match": map[string]any{
-			"query":  query,
-			"fields": []string{"title^2", "category_path^2", "category^1.5", "bullets", "description"},
-		},
-	}
+	baseQuery := lexicalBM25Query(query)
 	if intent := genderIntentLabel(query); intent != "" {
 		baseQuery = genderBoostingQuery(baseQuery, intent)
 	}
 	return json.Marshal(map[string]any{
-		"size":    k,
-		"_source": sourceFields(),
-		"query":   baseQuery,
+		"size":                        k,
+		"_source":                     sourceFields(),
+		"include_named_queries_score": true,
+		"query":                       baseQuery,
 	})
+}
+
+func lexicalBM25Query(query string) map[string]any {
+	fieldMatch := func(name, field string, boost float64) map[string]any {
+		return map[string]any{
+			"match": map[string]any{
+				field: map[string]any{
+					"query": query,
+					"boost": boost,
+					"_name": name,
+				},
+			},
+		}
+	}
+	return map[string]any{
+		"bool": map[string]any{
+			"must": []any{
+				map[string]any{
+					"dis_max": map[string]any{
+						"tie_breaker": 0.1,
+						"queries": []any{
+							fieldMatch("bm25_title", "title", 2.0),
+							fieldMatch("bm25_category_path", "category_path", 2.0),
+							fieldMatch("bm25_category", "category", 1.5),
+							fieldMatch("bm25_bullets", "bullets", 1.0),
+							fieldMatch("bm25_description", "description", 1.0),
+						},
+					},
+				},
+			},
+			"should": []any{
+				map[string]any{
+					"match": map[string]any{
+						"brand.text": map[string]any{
+							"query":          query,
+							"boost":          2.5,
+							"fuzziness":      "AUTO",
+							"prefix_length":  1,
+							"max_expansions": 20,
+							"_name":          "bm25_brand",
+						},
+					},
+				},
+			},
+		},
+	}
 }
 
 func (e *Engine) bm25Raw(ctx context.Context, query string, k int) ([]rawHit, error) {
@@ -160,17 +247,23 @@ func (e *Engine) BM25(ctx context.Context, query string, k int) ([]Hit, error) {
 	hits := make([]Hit, 0, len(raws))
 	for i, r := range raws {
 		hits = append(hits, Hit{
-			ProductID:       r.Source.ProductID,
-			Title:           r.Source.Title,
-			Brand:           r.Source.Brand,
-			Color:           r.Source.Color,
-			Category:        r.Source.Category,
-			CategoryPath:    r.Source.CategoryPath,
-			DerivedGender:   r.Source.DerivedGender,
-			PriceCents:      r.Source.PriceCents,
-			PopularityPrior: r.Source.PopularityPrior,
-			BM25:            r.Score,
-			BM25Rank:        i + 1,
+			ProductID:        r.Source.ProductID,
+			Title:            r.Source.Title,
+			Brand:            r.Source.Brand,
+			Color:            r.Source.Color,
+			Category:         r.Source.Category,
+			CategoryPath:     r.Source.CategoryPath,
+			DerivedGender:    r.Source.DerivedGender,
+			PriceCents:       r.Source.PriceCents,
+			PopularityPrior:  r.Source.PopularityPrior,
+			BM25:             r.Score,
+			BM25Rank:         i + 1,
+			TitleBM25:        r.MatchedScores["bm25_title"],
+			CategoryPathBM25: r.MatchedScores["bm25_category_path"],
+			CategoryBM25:     r.MatchedScores["bm25_category"],
+			BulletsBM25:      r.MatchedScores["bm25_bullets"],
+			DescriptionBM25:  r.MatchedScores["bm25_description"],
+			BrandBM25:        r.MatchedScores["bm25_brand"],
 		})
 	}
 	return hits, nil
@@ -206,12 +299,13 @@ func (e *Engine) Hybrid(ctx context.Context, query string, vec []float32, candN,
 	}
 
 	type fused struct {
-		src      osSource
-		bm25     float64
-		knn      float64
-		bm25Rank int
-		knnRank  int
-		rrf      float64
+		src         osSource
+		bm25        float64
+		knn         float64
+		bm25Rank    int
+		knnRank     int
+		rrf         float64
+		fieldScores map[string]float64
 	}
 	merged := make(map[string]*fused, candN)
 	missingRank := candN + 1
@@ -225,6 +319,7 @@ func (e *Engine) Hybrid(ctx context.Context, query string, vec []float32, candN,
 		f.bm25 = h.Score
 		f.bm25Rank = i + 1
 		f.rrf += 1.0 / float64(rrfK+i+1)
+		f.fieldScores = h.MatchedScores
 	}
 	for i, h := range knn {
 		f, ok := merged[h.ID]
@@ -240,20 +335,26 @@ func (e *Engine) Hybrid(ctx context.Context, query string, vec []float32, candN,
 	hits := make([]Hit, 0, len(merged))
 	for _, f := range merged {
 		hits = append(hits, Hit{
-			ProductID:       f.src.ProductID,
-			Title:           f.src.Title,
-			Brand:           f.src.Brand,
-			Color:           f.src.Color,
-			Category:        f.src.Category,
-			CategoryPath:    f.src.CategoryPath,
-			DerivedGender:   f.src.DerivedGender,
-			PriceCents:      f.src.PriceCents,
-			PopularityPrior: f.src.PopularityPrior,
-			BM25:            f.bm25,
-			BM25Rank:        f.bm25Rank,
-			KNN:             f.knn,
-			KNNRank:         f.knnRank,
-			RRF:             f.rrf,
+			ProductID:        f.src.ProductID,
+			Title:            f.src.Title,
+			Brand:            f.src.Brand,
+			Color:            f.src.Color,
+			Category:         f.src.Category,
+			CategoryPath:     f.src.CategoryPath,
+			DerivedGender:    f.src.DerivedGender,
+			PriceCents:       f.src.PriceCents,
+			PopularityPrior:  f.src.PopularityPrior,
+			BM25:             f.bm25,
+			BM25Rank:         f.bm25Rank,
+			KNN:              f.knn,
+			KNNRank:          f.knnRank,
+			RRF:              f.rrf,
+			TitleBM25:        f.fieldScores["bm25_title"],
+			CategoryPathBM25: f.fieldScores["bm25_category_path"],
+			CategoryBM25:     f.fieldScores["bm25_category"],
+			BulletsBM25:      f.fieldScores["bm25_bullets"],
+			DescriptionBM25:  f.fieldScores["bm25_description"],
+			BrandBM25:        f.fieldScores["bm25_brand"],
 		})
 	}
 	// Sort by RRF desc.

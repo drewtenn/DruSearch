@@ -8,8 +8,8 @@ Status: **local hybrid + personalized LTR stack is implemented.** The default
 catalog source is Amazon Shopping Queries / ESCI, preserving real query groups
 with graded `E`/`S`/`C`/`I` judgments for evaluation and training labels. The
 default local target is about 10,000 products, vectors come from the
-`BAAI/bge-small-en-v1.5` embedder sidecar, and the served ranker uses the
-canonical v4 feature schema with 27 features. Model promotion writes served
+`BAAI/bge-base-en-v1.5` embedder sidecar, and the served ranker uses the
+canonical v8 feature schema with 35 features. Model promotion writes served
 artifacts under `models/`; commit those artifacts when another machine should
 serve the same trained ranker without rerunning BGE teacher scoring or training.
 
@@ -89,7 +89,7 @@ model names are driven by `.env` and the defaults in `docker-compose.yml`.
 | Component | Module / image | Purpose | Notes |
 |---|---|---|---|
 | Go API | `services/api-go` | Hot path for search, product lookup, events, admin, metrics | Stateless apart from in-process model handle and event buffer. |
-| Embedder sidecar | `services/embedder-py` | Encodes queries and product titles into 384-dim vectors | Default model is `BAAI/bge-small-en-v1.5`; same code path is used for indexing and querying. |
+| Embedder sidecar | `services/embedder-py` | Encodes queries and product titles into 768-dim vectors | Default model is `BAAI/bge-base-en-v1.5`; same code path is used for indexing and querying. |
 | OpenSearch 2.19.1 | `opensearch` | BM25 and Lucene HNSW kNN over `products_v1` | Single shard, zero replicas, local security disabled. |
 | Postgres 16 | `postgres` | Product catalog, ESCI graded judgments, event log, training rows, product aggregates | Schema lives in `infra/postgres/001_init.sql`. |
 | Redis 7 | `redis` | Online user feature store | `features.user_aggs` writes per-user brand affinity hashes. |
@@ -305,12 +305,13 @@ OpenSearch index `products_v1`:
 |---|---|---|
 | `product_id` | keyword | Postgres |
 | `title`, `description`, `bullets` | text with custom English analyzer | Postgres |
-| `brand`, `color`, `category` | keyword | Postgres |
+| `brand`, `color` | keyword | Postgres |
+| `category` | text plus `.raw` keyword | Postgres |
 | `category_path` | text plus `.raw` keyword | Postgres |
 | `derived_gender` | keyword | Ingestion-derived from category path, then title |
 | `price_cents` | integer | Postgres |
 | `popularity_prior`, `ctr_prior` | float | Postgres / aggregates |
-| `title_vec` | `knn_vector(384)`, Lucene HNSW cosine similarity | Embedder sidecar |
+| `title_vec` | `knn_vector(768)`, Lucene HNSW cosine similarity | Embedder sidecar |
 
 ## APIs
 

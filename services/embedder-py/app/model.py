@@ -10,7 +10,7 @@ from sentence_transformers import SentenceTransformer
 
 from app.torch_device import resolve_torch_device
 
-_MODEL_NAME = os.getenv("EMBEDDER_MODEL", "BAAI/bge-small-en-v1.5")
+_MODEL_NAME = os.getenv("EMBEDDER_MODEL", "BAAI/bge-base-en-v1.5")
 _MODEL_DEVICE = os.getenv("EMBEDDER_DEVICE", "auto")
 _LOAD_LOCK = threading.Lock()
 

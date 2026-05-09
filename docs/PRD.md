@@ -173,7 +173,7 @@ These are decisions already adopted; revisiting them requires explicit justifica
 | Hybrid retrieval (BM25 + dense + RRF) | Industry standard for modern e-commerce search | High; the entire ranking stack assumes this. |
 | OpenSearch for both BM25 and k-NN | Avoids running a separate vector DB | Medium; pgvector is a viable alternative. |
 | LightGBM LambdaRank | Strong tabular baseline, fast inference, mature tooling | Medium. |
-| `BAAI/bge-small-en-v1.5` (384-d) | Modern small embedder; strong retrieval signal on CPU | Low; swap is one line in the embedder sidecar. |
+| `BAAI/bge-base-en-v1.5` (768-d) | Stronger general-purpose BGE embedder for semantic retrieval | Medium; requires rebuilding the OpenSearch index vectors. |
 | Synthetic click simulator that calls the real API | Production-shape dogfooding from day one | Low; replaceable with real event replay. |
 | Protobuf feature schema + codegen | Compile-time errors when adding features in the LTR vector | Medium. |
 
@@ -192,7 +192,7 @@ These are real production search concerns; they are explicitly deferred so the L
 | ID | Risk / question | Mitigation / next step |
 |---|---|---|
 | R1 | `dmitryikh/leaves` may not parse the `lambdarank` objective string. | Verified at Phase 5 with a fixture. Mitigation: rewrite metadata to `regression` in `pipelines.register.promote` (trees unchanged; LambdaRank outputs raw scores). |
-| R2 | BGE-small vs MiniLM hasn't been A/B'd on ESCI specifically. | Phase 2 measures NDCG@10; swap if MiniLM wins by ≥1 point. |
+| R2 | Larger BGE models have not been A/B'd on ESCI specifically. | Offline eval measures NDCG@10 and recall diagnostics before further model-size changes. |
 | R3 | Position-bias correction in training labels (IPS weights). | Disabled in v1; revisit at Phase 7 once we have enough simulated traffic. |
 | R4 | OpenSearch native RRF (`hybrid` query + score-ranker pipeline). | Currently using client-side RRF in Go. Native pipeline can replace it without API changes; deferred until there's a measurable reason. |
 | R5 | Single-node OpenSearch is the only HA-relevant component. | Acceptable for the local-first goal. Production deployment would shift to a managed cluster. |

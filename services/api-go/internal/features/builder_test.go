@@ -35,6 +35,41 @@ func TestBuildMatrixAffordabilityPriceScore(t *testing.T) {
 	}
 }
 
+func TestBuildMatrixIncludesNamedBM25FieldScores(t *testing.T) {
+	hits := []retrieval.Hit{
+		{
+			ProductID:        "p1",
+			TitleBM25:        4.5,
+			CategoryPathBM25: 3.5,
+			CategoryBM25:     2.5,
+			BulletsBM25:      1.5,
+			DescriptionBM25:  0.5,
+			BrandBM25:        6.5,
+		},
+	}
+
+	matrix := BuildMatrix("nike shoes", hits, nil, nil)
+
+	if got := matrix[IdxTitleBM25Score]; got != 4.5 {
+		t.Fatalf("title bm25 = %v, want 4.5", got)
+	}
+	if got := matrix[IdxCategoryPathBM25Score]; got != 3.5 {
+		t.Fatalf("category path bm25 = %v, want 3.5", got)
+	}
+	if got := matrix[IdxCategoryBM25Score]; got != 2.5 {
+		t.Fatalf("category bm25 = %v, want 2.5", got)
+	}
+	if got := matrix[IdxBulletsBM25Score]; got != 1.5 {
+		t.Fatalf("bullets bm25 = %v, want 1.5", got)
+	}
+	if got := matrix[IdxDescriptionBM25Score]; got != 0.5 {
+		t.Fatalf("description bm25 = %v, want 0.5", got)
+	}
+	if got := matrix[IdxBrandBM25Score]; got != 6.5 {
+		t.Fatalf("brand bm25 = %v, want 6.5", got)
+	}
+}
+
 func TestBuildMatrixAffordabilityPriceScoreInactiveWithoutIntent(t *testing.T) {
 	matrix := BuildMatrix("running shoes", []retrieval.Hit{{ProductID: "p", PriceCents: 1_000}}, nil, nil)
 

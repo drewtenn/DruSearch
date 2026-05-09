@@ -38,6 +38,12 @@ class FeatureDef:
 FEATURES: tuple[FeatureDef, ...] = (
     FeatureDef("bm25_score", Source.RETRIEVAL, "BM25 raw score"),
     FeatureDef("bm25_rank", Source.RETRIEVAL, "BM25 rank within query; absent encoded as max observed rank + 1"),
+    FeatureDef("title_bm25_score", Source.RETRIEVAL, "Named BM25 contribution from the title field"),
+    FeatureDef("category_path_bm25_score", Source.RETRIEVAL, "Named BM25 contribution from the category path field"),
+    FeatureDef("category_bm25_score", Source.RETRIEVAL, "Named BM25 contribution from the leaf category field"),
+    FeatureDef("bullets_bm25_score", Source.RETRIEVAL, "Named BM25 contribution from the bullet text field"),
+    FeatureDef("description_bm25_score", Source.RETRIEVAL, "Named BM25 contribution from the description field"),
+    FeatureDef("brand_bm25_score", Source.RETRIEVAL, "Named fuzzy BM25 contribution from the brand field"),
     FeatureDef("knn_score", Source.RETRIEVAL, "k-NN cosine similarity"),
     FeatureDef("knn_rank", Source.RETRIEVAL, "k-NN rank within query; absent encoded as max observed rank + 1"),
     FeatureDef("rrf_score", Source.RETRIEVAL, "RRF fused retrieval score"),

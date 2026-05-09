@@ -11,41 +11,53 @@ package features
 const (
 	IdxBM25Score                   = 0
 	IdxBM25Rank                    = 1
-	IdxKNNScore                    = 2
-	IdxKNNRank                     = 3
-	IdxRRFScore                    = 4
-	IdxPopularityPrior             = 5
-	IdxPriceLogCents               = 6
-	IdxTitleLengthTokens           = 7
-	IdxQueryLengthTokens           = 8
-	IdxQueryHasBrand               = 9
-	IdxQueryHasColor               = 10
-	IdxQueryHasCategoryToken       = 11
-	IdxQueryHasSizePat             = 12
-	IdxQueryGenderIntent           = 13
-	IdxProductGender               = 14
-	IdxGenderIntentMatch           = 15
-	IdxGenderIntentMis             = 16
-	IdxProductBrandMatch           = 17
-	IdxProductBrandTokenOverlap    = 18
-	IdxProductColorMatch           = 19
-	IdxTitleQueryTokenCoverage     = 20
-	IdxCategoryQueryTokenCoverage  = 21
-	IdxProductCategoryTokenOverlap = 22
-	IdxTitleExactQueryMatch        = 23
-	IdxUserBrandAffinity           = 24
-	IdxQueryAffordabilityIntent    = 25
-	IdxAffordabilityPriceScore     = 26
-	IdxBrandFamilyMatch            = 27
-	IdxSubbrandTitleMatch          = 28
+	IdxTitleBM25Score              = 2
+	IdxCategoryPathBM25Score       = 3
+	IdxCategoryBM25Score           = 4
+	IdxBulletsBM25Score            = 5
+	IdxDescriptionBM25Score        = 6
+	IdxBrandBM25Score              = 7
+	IdxKNNScore                    = 8
+	IdxKNNRank                     = 9
+	IdxRRFScore                    = 10
+	IdxPopularityPrior             = 11
+	IdxPriceLogCents               = 12
+	IdxTitleLengthTokens           = 13
+	IdxQueryLengthTokens           = 14
+	IdxQueryHasBrand               = 15
+	IdxQueryHasColor               = 16
+	IdxQueryHasCategoryToken       = 17
+	IdxQueryHasSizePat             = 18
+	IdxQueryGenderIntent           = 19
+	IdxProductGender               = 20
+	IdxGenderIntentMatch           = 21
+	IdxGenderIntentMis             = 22
+	IdxProductBrandMatch           = 23
+	IdxProductBrandTokenOverlap    = 24
+	IdxProductColorMatch           = 25
+	IdxTitleQueryTokenCoverage     = 26
+	IdxCategoryQueryTokenCoverage  = 27
+	IdxProductCategoryTokenOverlap = 28
+	IdxTitleExactQueryMatch        = 29
+	IdxUserBrandAffinity           = 30
+	IdxQueryAffordabilityIntent    = 31
+	IdxAffordabilityPriceScore     = 32
+	IdxBrandFamilyMatch            = 33
+	IdxSubbrandTitleMatch          = 34
 
-	NumFeatures = 29
+	NumFeatures = 35
 )
 
 // Names ordered by their feature index above.
 var Names = [...]string{
 	"bm25_score",
 	"bm25_rank",
+	"title_bm25_score",
+	"category_path_bm25_score",
+	"category_bm25_score",
+	"bullets_bm25_score",
+	"description_bm25_score",
+	"brand_bm25_score",
 	"knn_score",
 	"knn_rank",
 	"rrf_score",

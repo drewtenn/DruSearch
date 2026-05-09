@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestBuildBM25BodyLeavesQueriesUnfiltered(t *testing.T) {
+func TestBuildBM25BodyUsesNamedFieldQueriesAndBrandFuzziness(t *testing.T) {
 	for _, queryText := range []string{
 		"nike running shoes",
 	} {
@@ -21,12 +21,26 @@ func TestBuildBM25BodyLeavesQueriesUnfiltered(t *testing.T) {
 				t.Fatalf("unmarshal body: %v", err)
 			}
 
-			query := got["query"].(map[string]any)
-			if _, ok := query["multi_match"]; !ok {
-				t.Fatalf("query=%#v, want plain multi_match", query)
+			if got["include_named_queries_score"] != true {
+				t.Fatalf("include_named_queries_score=%#v, want true", got["include_named_queries_score"])
 			}
-			if _, ok := query["bool"]; ok {
+			query := got["query"].(map[string]any)
+			boolQuery := query["bool"].(map[string]any)
+			if _, ok := boolQuery["filter"]; ok {
 				t.Fatalf("query=%#v, want no hard filter", query)
+			}
+			should := boolQuery["should"].([]any)
+			if len(should) == 0 {
+				t.Fatalf("should=%#v, want fuzzy brand query", should)
+			}
+			brand := should[0].(map[string]any)["match"].(map[string]any)["brand.text"].(map[string]any)
+			if brand["fuzziness"] != "AUTO" {
+				t.Fatalf("brand fuzzy query=%#v, want AUTO fuzziness", brand)
+			}
+			disMax := boolQuery["must"].([]any)[0].(map[string]any)["dis_max"].(map[string]any)
+			queries := disMax["queries"].([]any)
+			if len(queries) != len(fieldScoreNames())-1 {
+				t.Fatalf("field queries=%#v, want one named query per BM25 field", queries)
 			}
 		})
 	}

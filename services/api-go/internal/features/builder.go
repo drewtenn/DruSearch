@@ -85,6 +85,12 @@ func BuildMatrix(query string, hits []retrieval.Hit, vocab *Vocab, user *UserFea
 		off := i * NumFeatures
 		out[off+IdxBM25Score] = h.BM25
 		out[off+IdxBM25Rank] = float64(rankFeature(h.BM25Rank, missingRank))
+		out[off+IdxTitleBM25Score] = h.TitleBM25
+		out[off+IdxCategoryPathBM25Score] = h.CategoryPathBM25
+		out[off+IdxCategoryBM25Score] = h.CategoryBM25
+		out[off+IdxBulletsBM25Score] = h.BulletsBM25
+		out[off+IdxDescriptionBM25Score] = h.DescriptionBM25
+		out[off+IdxBrandBM25Score] = h.BrandBM25
 		out[off+IdxKNNScore] = h.KNN
 		out[off+IdxKNNRank] = float64(rankFeature(h.KNNRank, missingRank))
 		out[off+IdxRRFScore] = h.RRF

@@ -42,6 +42,9 @@ TRAINING_ROW_SOURCE = os.getenv("TRAINING_ROW_SOURCE", "offline_candidates")
 LTR_CAND_N = int(os.getenv("LTR_CAND_N", os.getenv("EVAL_CAND_N", "200")))
 PSEUDO_LABELS_ENABLED = os.getenv("LTR_PSEUDO_LABELS", "0").lower() in {"1", "true", "yes"}
 PSEUDO_LABEL_WEIGHT = float(os.getenv("LTR_PSEUDO_LABEL_WEIGHT", "0.25"))
+HARD_NEGATIVES_ENABLED = os.getenv("LTR_HARD_NEGATIVES", "1").lower() in {"1", "true", "yes"}
+HARD_NEGATIVE_WEIGHT = float(os.getenv("LTR_HARD_NEGATIVE_WEIGHT", "2.0"))
+HARD_NEGATIVE_RANK_GAP = int(os.getenv("LTR_HARD_NEGATIVE_RANK_GAP", "50"))
 
 # ESCI to integer label gain index. label_gain default for LightGBM is
 # [0, 1, 3, 7, 15, ...] (i.e., 2^i - 1 for label i). We use:
@@ -347,6 +350,49 @@ def apply_supervision(
     )
 
 
+def apply_hard_negative_weights(
+    df: pd.DataFrame,
+    *,
+    enabled: bool,
+    hard_negative_weight: float,
+    rank_gap: int,
+) -> pd.DataFrame:
+    """Upweight train negatives that are plausible retrieval mistakes.
+
+    These rows are still labeled irrelevant; the larger weight teaches the
+    ranker to resolve cases where lexical and vector retrieval disagree or
+    where the candidate lands in the competitive middle of the fused list.
+    """
+    out = df.copy()
+    if "sample_weight" not in out.columns:
+        out["sample_weight"] = 1.0
+    else:
+        out["sample_weight"] = out["sample_weight"].astype(float)
+    if not enabled or out.empty:
+        return out
+
+    train_negative = (out["split"] == "train") & (out["label"].astype(float) <= 0)
+    rank_disagreement = (
+        (out["bm25_rank"].astype(float) - out["knn_rank"].astype(float)).abs()
+        >= float(rank_gap)
+    )
+    rrf = out["rrf_score"].astype(float)
+    middle_rrf = pd.Series(False, index=out.index)
+    for _qid, idx in out.groupby("query_id").groups.items():
+        group_rrf = rrf.loc[idx]
+        if len(group_rrf) < 4:
+            continue
+        lo = group_rrf.quantile(0.25)
+        hi = group_rrf.quantile(0.75)
+        middle_rrf.loc[idx] = group_rrf.between(lo, hi, inclusive="both")
+
+    hard_negative = train_negative & (rank_disagreement | middle_rrf)
+    out.loc[hard_negative, "sample_weight"] = out.loc[
+        hard_negative, "sample_weight"
+    ].clip(lower=hard_negative_weight)
+    return out
+
+
 def ensure_training_rows_schema() -> None:
     with db.conn() as c, c.cursor() as cur:
         training_row_builds.ensure_schema(cur)
@@ -604,6 +650,12 @@ def main() -> int:
             judgments,
             pseudo_labels_enabled=PSEUDO_LABELS_ENABLED,
             pseudo_weight=PSEUDO_LABEL_WEIGHT,
+        )
+        df = apply_hard_negative_weights(
+            df,
+            enabled=HARD_NEGATIVES_ENABLED,
+            hard_negative_weight=HARD_NEGATIVE_WEIGHT,
+            rank_gap=HARD_NEGATIVE_RANK_GAP,
         )
         label_source = "ESCI + train pseudo-labels" if PSEUDO_LABELS_ENABLED else "ESCI only"
         log.info("label distribution (%s): %s", label_source, df["label"].value_counts().sort_index().to_dict())

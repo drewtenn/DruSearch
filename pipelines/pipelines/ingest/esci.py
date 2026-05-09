@@ -47,6 +47,69 @@ PRODUCT_COLUMNS = [
     "product_color",
 ]
 
+ROOT_CATEGORY = "Clothing, Shoes & Jewelry"
+
+GENDER_CATEGORY_TOKENS = {
+    "Men": {"men", "mens", "man", "male"},
+    "Women": {"women", "womens", "woman", "female", "ladies"},
+    "Boys": {"boys", "boy"},
+    "Girls": {"girls", "girl"},
+}
+
+CATEGORY_RULES: tuple[tuple[set[str], list[str]], ...] = (
+    ({"running", "runner", "jogging"}, ["Shoes", "Athletic", "Running"]),
+    ({"basketball"}, ["Shoes", "Athletic", "Basketball"]),
+    ({"hiking", "trail"}, ["Shoes", "Outdoor", "Hiking"]),
+    ({"sneaker", "sneakers", "shoe", "shoes", "footwear"}, ["Shoes"]),
+    ({"boot", "boots"}, ["Shoes", "Boots"]),
+    ({"sandal", "sandals"}, ["Shoes", "Sandals"]),
+    ({"hoodie", "hoodies", "hooded", "sweatshirt", "sweatshirts"}, ["Clothing", "Tops", "Hoodies & Sweatshirts"]),
+    ({"shirt", "shirts", "tee", "tshirt", "tshirts"}, ["Clothing", "Tops", "Shirts"]),
+    ({"jacket", "jackets", "coat", "coats"}, ["Clothing", "Outerwear"]),
+    ({"jean", "jeans", "pant", "pants", "trouser", "trousers"}, ["Clothing", "Bottoms"]),
+    ({"dress", "dresses"}, ["Clothing", "Dresses"]),
+    ({"hat", "hats", "cap", "caps", "beanie", "beanies"}, ["Accessories", "Hats"]),
+    ({"sock", "socks"}, ["Clothing", "Socks"]),
+)
+
+
+def _tokenize_category_text(text: object) -> set[str]:
+    return {
+        token
+        for token in "".join(
+            ch.lower() if ch.isalnum() else " "
+            for ch in str(text or "").replace("'", "")
+        ).split()
+        if token
+    }
+
+
+def _product_text(row: object) -> str:
+    def value(name: str) -> object:
+        if isinstance(row, pd.Series):
+            return row.get(name)
+        return getattr(row, name, None)
+
+    return " ".join(
+        str(value(name) or "")
+        for name in ("product_title", "product_description", "product_bullet_point")
+    )
+
+
+def _category_path_from_product(row: object) -> list[str]:
+    tokens = _tokenize_category_text(_product_text(row))
+    path = [ROOT_CATEGORY]
+
+    for label, gender_tokens in GENDER_CATEGORY_TOKENS.items():
+        if tokens & gender_tokens:
+            path.append(label)
+            break
+
+    for required, suffix in CATEGORY_RULES:
+        if tokens & required:
+            return path + suffix
+    return path + ["General"]
+
 
 @dataclass(frozen=True)
 class Selection:
@@ -121,6 +184,7 @@ def _select_products(examples: pd.DataFrame, target: int, seed: int) -> Selectio
 def _iter_rows(df: pd.DataFrame) -> Iterable[tuple]:
     """Yield rows for COPY in the order matching the COPY column list."""
     for r in df.itertuples(index=False):
+        category_path = _category_path_from_product(r)
         yield (
             r.product_id,
             "us",
@@ -129,6 +193,10 @@ def _iter_rows(df: pd.DataFrame) -> Iterable[tuple]:
             getattr(r, "product_bullet_point", None) or None,
             getattr(r, "product_brand", None) or None,
             getattr(r, "product_color", None) or None,
+            None,
+            category_path[-1] if category_path else "",
+            0.0,
+            category_path,
         )
 
 
@@ -201,7 +269,7 @@ def main() -> int:
                 cur.execute("TRUNCATE search_events, training_rows, user_sessions RESTART IDENTITY")
                 cur.execute("TRUNCATE products RESTART IDENTITY CASCADE")
                 with cur.copy(
-                    "COPY products (product_id, locale, title, description, bullet_points, brand, color) FROM STDIN"
+                    "COPY products (product_id, locale, title, description, bullet_points, brand, color, price_cents, category, popularity_prior, category_path) FROM STDIN"
                 ) as copy:
                     for row in _iter_rows(products):
                         copy.write_row(row)

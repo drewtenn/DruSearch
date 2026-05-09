@@ -7,7 +7,12 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from pipelines.ingest import esci
-from pipelines.ingest.esci import _filtered_products_from_parquet, _select_products
+from pipelines.ingest.esci import (
+    _category_path_from_product,
+    _filtered_products_from_parquet,
+    _iter_rows,
+    _select_products,
+)
 
 
 def test_filtered_products_from_parquet_filters_in_batches(tmp_path):
@@ -33,6 +38,48 @@ def test_filtered_products_from_parquet_filters_in_batches(tmp_path):
 
     assert products["product_id"].tolist() == ["keep-us", "keep-us-2"]
     assert products["product_title"].tolist() == ["Keep One", "Keep Two"]
+
+
+def test_category_path_from_product_derives_ecommerce_taxonomy():
+    row = pd.Series(
+        {
+            "product_title": "Nike Men's Trail Running Shoes",
+            "product_description": "Breathable athletic sneaker for long runs",
+            "product_bullet_point": "Rubber outsole",
+        }
+    )
+
+    assert _category_path_from_product(row) == [
+        "Clothing, Shoes & Jewelry",
+        "Men",
+        "Shoes",
+        "Athletic",
+        "Running",
+    ]
+
+
+def test_iter_rows_populates_category_fields_for_esci_products():
+    products = pd.DataFrame(
+        {
+            "product_id": ["p1"],
+            "product_title": ["Women's Hooded Sweatshirt"],
+            "product_description": ["Fleece hoodie"],
+            "product_bullet_point": ["Pullover"],
+            "product_brand": ["BrandA"],
+            "product_color": ["black"],
+        }
+    )
+
+    row = next(_iter_rows(products))
+
+    assert row[8] == "Hoodies & Sweatshirts"
+    assert row[10] == [
+        "Clothing, Shoes & Jewelry",
+        "Women",
+        "Clothing",
+        "Tops",
+        "Hoodies & Sweatshirts",
+    ]
 
 
 def test_select_products_keeps_query_groups_complete():

@@ -118,6 +118,34 @@ def test_training_split_uses_canonical_esci_split_before_hash_fallback():
     ]
 
 
+def test_hard_negative_weights_target_disagreement_and_middle_rrf_rows():
+    rows = pd.DataFrame(
+        {
+            "query_id": ["q1", "q1", "q1", "q1"],
+            "product_id": ["positive", "easy_negative", "bm25_only", "middle_rrf"],
+            "label": [4.0, 0.0, 0.0, 0.0],
+            "split": ["train", "train", "train", "train"],
+            "sample_weight": [1.0, 1.0, 1.0, 1.0],
+            "bm25_rank": [1, 2, 3, 20],
+            "knn_rank": [1, 2, 201, 22],
+            "rrf_score": [0.04, 0.001, 0.015, 0.02],
+        }
+    )
+
+    got = build_training_rows.apply_hard_negative_weights(
+        rows,
+        enabled=True,
+        hard_negative_weight=2.0,
+        rank_gap=50,
+    )
+
+    weights = dict(zip(got["product_id"], got["sample_weight"]))
+    assert weights["positive"] == 1.0
+    assert weights["easy_negative"] == 1.0
+    assert weights["bm25_only"] == 2.0
+    assert weights["middle_rrf"] == 2.0
+
+
 def test_retrieval_rank_features_encode_absent_side_as_worse_than_seen_rank():
     hits = [
         {"product_id": "both", "bm25_rank": 1, "knn_rank": 2},

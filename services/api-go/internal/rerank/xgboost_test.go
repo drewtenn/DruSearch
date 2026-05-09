@@ -84,7 +84,7 @@ func TestRerankerReloadLoadsXGBoostFromMetadata(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "ltr_reranker.xgb.json"), []byte(tinyXGBoostModel), 0o644); err != nil {
 		t.Fatalf("write model: %v", err)
 	}
-	meta := `{"name":"ltr_reranker","version":"9","model_backend":"xgboost"}`
+	meta := `{"name":"ltr_reranker","version":"9","model_backend":"xgboost","feature_schema_version":"` + features.SchemaVersion + `"}`
 	if err := os.WriteFile(filepath.Join(dir, "ltr_reranker.json"), []byte(meta), 0o644); err != nil {
 		t.Fatalf("write meta: %v", err)
 	}
@@ -98,5 +98,21 @@ func TestRerankerReloadLoadsXGBoostFromMetadata(t *testing.T) {
 	}
 	if loaded.Meta["model_backend"] != "xgboost" {
 		t.Fatalf("model_backend = %v", loaded.Meta["model_backend"])
+	}
+}
+
+func TestRerankerReloadRejectsSchemaMismatchedModel(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ltr_reranker.xgb.json"), []byte(tinyXGBoostModel), 0o644); err != nil {
+		t.Fatalf("write model: %v", err)
+	}
+	meta := `{"name":"ltr_reranker","version":"9","model_backend":"xgboost","feature_schema_version":"v0"}`
+	if err := os.WriteFile(filepath.Join(dir, "ltr_reranker.json"), []byte(meta), 0o644); err != nil {
+		t.Fatalf("write meta: %v", err)
+	}
+
+	_, err := New(dir, "ltr_reranker").Reload()
+	if err == nil {
+		t.Fatalf("Reload succeeded, want schema mismatch")
 	}
 }

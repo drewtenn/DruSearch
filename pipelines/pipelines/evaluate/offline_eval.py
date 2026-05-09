@@ -128,10 +128,47 @@ def _load_judgments(query_ids: list[int]) -> dict[int, dict[str, str]]:
 # ---------------------------------------------------------------------------
 
 def _bm25_query(query: str) -> dict:
+    def field_match(name: str, field: str, boost: float) -> dict:
+        return {
+            "match": {
+                field: {
+                    "query": query,
+                    "boost": boost,
+                    "_name": name,
+                }
+            }
+        }
+
     base = {
-        "multi_match": {
-            "query": query,
-            "fields": ["title^2", "category_path^2", "category^1.5", "bullets", "description"],
+        "bool": {
+            "must": [
+                {
+                    "dis_max": {
+                        "tie_breaker": 0.1,
+                        "queries": [
+                            field_match("bm25_title", "title", 2.0),
+                            field_match("bm25_category_path", "category_path", 2.0),
+                            field_match("bm25_category", "category", 1.5),
+                            field_match("bm25_bullets", "bullets", 1.0),
+                            field_match("bm25_description", "description", 1.0),
+                        ],
+                    }
+                }
+            ],
+            "should": [
+                {
+                    "match": {
+                        "brand.text": {
+                            "query": query,
+                            "boost": 2.5,
+                            "fuzziness": "AUTO",
+                            "prefix_length": 1,
+                            "max_expansions": 20,
+                            "_name": "bm25_brand",
+                        }
+                    }
+                }
+            ],
         }
     }
     intent = _gender_intent_label(query)
@@ -204,6 +241,7 @@ class HybridRetriever:
         body_bm25 = {
             "size": n,
             "_source": False,
+            "include_named_queries_score": True,
             "query": _bm25_query(query),
         }
         bm25_resp = self.os.search(index=self.index, body=body_bm25)
@@ -225,6 +263,13 @@ class HybridRetriever:
             d["bm25"] = h["_score"]
             d["bm25_rank"] = i + 1
             d["rrf"] += 1.0 / (60 + i + 1)
+            matched = _matched_query_scores(h.get("matched_queries"))
+            d["title_bm25"] = matched.get("bm25_title", 0.0)
+            d["category_path_bm25"] = matched.get("bm25_category_path", 0.0)
+            d["category_bm25"] = matched.get("bm25_category", 0.0)
+            d["bullets_bm25"] = matched.get("bm25_bullets", 0.0)
+            d["description_bm25"] = matched.get("bm25_description", 0.0)
+            d["brand_bm25"] = matched.get("bm25_brand", 0.0)
         for i, h in enumerate(knn_hits):
             pid = h["_id"]
             d = merged.setdefault(pid, {"product_id": pid, "bm25": 0.0, "knn": 0.0, "rrf": 0.0, "bm25_rank": 0, "knn_rank": 0})
@@ -235,6 +280,14 @@ class HybridRetriever:
         out = ltr_rows.normalize_retrieval_ranks(merged.values())
         out.sort(key=lambda d: -d["rrf"])
         return out
+
+
+def _matched_query_scores(value: object) -> dict[str, float]:
+    if isinstance(value, dict):
+        return {str(k): float(v or 0.0) for k, v in value.items()}
+    if isinstance(value, list):
+        return {str(k): 1.0 for k in value}
+    return {}
 
 
 # ---------------------------------------------------------------------------
@@ -289,6 +342,86 @@ def recall_at_k(judgments_for_query: dict[str, str], hit_ids: list[str], k: int)
         return 0.0
     seen = set(hit_ids[:k]) & relevant
     return len(seen) / len(relevant)
+
+
+class MetricAccumulator:
+    def __init__(self) -> None:
+        self.total_queries = 0
+        self.zero_results = 0
+        self.rrf: dict[str, list[float]] = {
+            "ndcg_at_5": [],
+            "ndcg_at_10": [],
+            "mrr": [],
+            "recall_at_10": [],
+            "recall_at_50": [],
+            "recall_at_100": [],
+            "candidate_recall": [],
+        }
+        self.ltr: dict[str, list[float]] = {
+            key: [] for key in self.rrf
+        }
+
+    def add_zero_result(self) -> None:
+        self.total_queries += 1
+        self.zero_results += 1
+
+    def add_rrf(
+        self,
+        judgments_for_query: dict[str, str],
+        hit_ids: list[str],
+        gains: np.ndarray | list[float],
+        ideal_gains: np.ndarray | list[float],
+    ) -> None:
+        self.total_queries += 1
+        gains_arr = np.asarray(gains, dtype=np.float64)
+        ideal_arr = np.asarray(ideal_gains, dtype=np.float64)
+        self._add_variant(self.rrf, judgments_for_query, hit_ids, gains_arr, ideal_arr)
+
+    def add_ltr(
+        self,
+        judgments_for_query: dict[str, str],
+        hit_ids: list[str],
+        gains: np.ndarray | list[float],
+        ideal_gains: np.ndarray | list[float],
+    ) -> None:
+        gains_arr = np.asarray(gains, dtype=np.float64)
+        ideal_arr = np.asarray(ideal_gains, dtype=np.float64)
+        self._add_variant(self.ltr, judgments_for_query, hit_ids, gains_arr, ideal_arr)
+
+    def _add_variant(
+        self,
+        variant: dict[str, list[float]],
+        judgments_for_query: dict[str, str],
+        hit_ids: list[str],
+        gains: np.ndarray,
+        ideal_gains: np.ndarray,
+    ) -> None:
+        variant["ndcg_at_5"].append(ndcg(gains, ideal_gains, 5))
+        variant["ndcg_at_10"].append(ndcg(gains, ideal_gains, 10))
+        variant["mrr"].append(mrr(gains))
+        variant["recall_at_10"].append(recall_at_k(judgments_for_query, hit_ids, 10))
+        variant["recall_at_50"].append(recall_at_k(judgments_for_query, hit_ids, 50))
+        variant["recall_at_100"].append(recall_at_k(judgments_for_query, hit_ids, 100))
+        variant["candidate_recall"].append(
+            recall_at_k(judgments_for_query, hit_ids, len(hit_ids))
+        )
+
+    def result(self, *, include_ltr: bool = False) -> dict:
+        def mean(xs: list[float]) -> float:
+            return float(np.mean(xs)) if xs else 0.0
+
+        out = {
+            "queries_evaluated": self.total_queries,
+            "queries_with_results": len(self.rrf["ndcg_at_10"]),
+            "zero_results": self.zero_results,
+            "zero_result_rate": (
+                self.zero_results / self.total_queries if self.total_queries else 0.0
+            ),
+            "rrf": {key: mean(values) for key, values in self.rrf.items()},
+        }
+        if include_ltr:
+            out["ltr"] = {key: mean(values) for key, values in self.ltr.items()}
+        return out
 
 
 # ---------------------------------------------------------------------------
@@ -376,10 +509,7 @@ def main() -> int:
 
     retriever = HybridRetriever()
     try:
-        ndcg_rrf, ndcg_ltr = [], []
-        ndcg5_rrf, ndcg5_ltr = [], []
-        mrr_rrf, mrr_ltr = [], []
-        recall10_rrf, recall10_ltr = [], []
+        metrics = MetricAccumulator()
 
         started = time.perf_counter()
         for i, (qid, qtext) in enumerate(test_queries, 1):
@@ -388,6 +518,7 @@ def main() -> int:
                 continue
             hits = retriever.search(qtext, CAND_N)
             if not hits:
+                metrics.add_zero_result()
                 continue
 
             ids_rrf = [h["product_id"] for h in hits]
@@ -399,10 +530,7 @@ def main() -> int:
             # Ideal: only judged products contribute (unjudged = 0)
             ideal_gains = np.sort(np.array(list(ESCI_GAIN.get(l, 0.0) for l in jset.values())))[::-1]
 
-            ndcg_rrf.append(ndcg(gains_all, ideal_gains, EVAL_K))
-            ndcg5_rrf.append(ndcg(gains_all, ideal_gains, 5))
-            mrr_rrf.append(mrr(gains_all))
-            recall10_rrf.append(recall_at_k(jset, ids_rrf, EVAL_K))
+            metrics.add_rrf(jset, ids_rrf, gains_all, ideal_gains)
 
             if booster is not None:
                 X = build_feature_matrix(qtext, hits, cat)
@@ -413,52 +541,38 @@ def main() -> int:
                     [ESCI_GAIN.get(jset.get(pid, "I"), 0.0) for pid in ids_ltr],
                     dtype=np.float64,
                 )
-                ndcg_ltr.append(ndcg(gains_ltr, ideal_gains, EVAL_K))
-                ndcg5_ltr.append(ndcg(gains_ltr, ideal_gains, 5))
-                mrr_ltr.append(mrr(gains_ltr))
-                recall10_ltr.append(recall_at_k(jset, ids_ltr, EVAL_K))
+                metrics.add_ltr(jset, ids_ltr, gains_ltr, ideal_gains)
 
             if i % 50 == 0:
+                partial = metrics.result(include_ltr=booster is not None)
                 log.info(
                     "progress %d/%d  RRF NDCG@10=%.4f  LTR NDCG@10=%.4f",
                     i, len(test_queries),
-                    float(np.mean(ndcg_rrf)) if ndcg_rrf else 0.0,
-                    float(np.mean(ndcg_ltr)) if ndcg_ltr else 0.0,
+                    partial["rrf"]["ndcg_at_10"],
+                    partial.get("ltr", {}).get("ndcg_at_10", 0.0),
                 )
 
         elapsed = time.perf_counter() - started
-        log.info("done in %.1fs evaluated_queries=%d", elapsed, len(ndcg_rrf))
-
-        def _mean(xs: list[float]) -> float:
-            return float(np.mean(xs)) if xs else 0.0
-
-        result = {
-            "queries_evaluated": len(ndcg_rrf),
-            "rrf": {
-                "ndcg_at_5":  _mean(ndcg5_rrf),
-                "ndcg_at_10": _mean(ndcg_rrf),
-                "mrr":        _mean(mrr_rrf),
-                "recall_at_10": _mean(recall10_rrf),
-            },
-        }
+        result = metrics.result(include_ltr=booster is not None)
+        log.info(
+            "done in %.1fs evaluated_queries=%d zero_results=%d zero_result_rate=%.4f",
+            elapsed,
+            result["queries_evaluated"],
+            result["zero_results"],
+            result["zero_result_rate"],
+        )
         if booster is not None:
-            result["ltr"] = {
-                "ndcg_at_5":  _mean(ndcg5_ltr),
-                "ndcg_at_10": _mean(ndcg_ltr),
-                "mrr":        _mean(mrr_ltr),
-                "recall_at_10": _mean(recall10_ltr),
-            }
             lift = result["ltr"]["ndcg_at_10"] - result["rrf"]["ndcg_at_10"]
             result["ltr_lift_ndcg_at_10"] = lift
             log.info("=" * 60)
-            log.info("RRF  NDCG@10=%.4f NDCG@5=%.4f MRR=%.4f Recall@10=%.4f",
-                     result["rrf"]["ndcg_at_10"], result["rrf"]["ndcg_at_5"], result["rrf"]["mrr"], result["rrf"]["recall_at_10"])
-            log.info("LTR  NDCG@10=%.4f NDCG@5=%.4f MRR=%.4f Recall@10=%.4f",
-                     result["ltr"]["ndcg_at_10"], result["ltr"]["ndcg_at_5"], result["ltr"]["mrr"], result["ltr"]["recall_at_10"])
+            log.info("RRF  NDCG@10=%.4f NDCG@5=%.4f MRR=%.4f Recall@10=%.4f Recall@50=%.4f Recall@100=%.4f CandRecall=%.4f",
+                     result["rrf"]["ndcg_at_10"], result["rrf"]["ndcg_at_5"], result["rrf"]["mrr"], result["rrf"]["recall_at_10"], result["rrf"]["recall_at_50"], result["rrf"]["recall_at_100"], result["rrf"]["candidate_recall"])
+            log.info("LTR  NDCG@10=%.4f NDCG@5=%.4f MRR=%.4f Recall@10=%.4f Recall@50=%.4f Recall@100=%.4f CandRecall=%.4f",
+                     result["ltr"]["ndcg_at_10"], result["ltr"]["ndcg_at_5"], result["ltr"]["mrr"], result["ltr"]["recall_at_10"], result["ltr"]["recall_at_50"], result["ltr"]["recall_at_100"], result["ltr"]["candidate_recall"])
             log.info("LTR vs RRF NDCG@10 lift = %+.4f", lift)
         else:
-            log.info("RRF  NDCG@10=%.4f NDCG@5=%.4f MRR=%.4f Recall@10=%.4f",
-                     result["rrf"]["ndcg_at_10"], result["rrf"]["ndcg_at_5"], result["rrf"]["mrr"], result["rrf"]["recall_at_10"])
+            log.info("RRF  NDCG@10=%.4f NDCG@5=%.4f MRR=%.4f Recall@10=%.4f Recall@50=%.4f Recall@100=%.4f CandRecall=%.4f",
+                     result["rrf"]["ndcg_at_10"], result["rrf"]["ndcg_at_5"], result["rrf"]["mrr"], result["rrf"]["recall_at_10"], result["rrf"]["recall_at_50"], result["rrf"]["recall_at_100"], result["rrf"]["candidate_recall"])
 
         # Log to MLflow as a standalone evaluation run, attached to the same experiment
         try:
@@ -468,11 +582,14 @@ def main() -> int:
             with mlflow.start_run(run_name=f"eval-{int(time.time())}"):
                 mlflow.log_params({
                     "queries_evaluated": result["queries_evaluated"],
+                    "queries_with_results": result["queries_with_results"],
+                    "zero_results": result["zero_results"],
                     "cand_n": CAND_N,
                     "k": EVAL_K,
                     "ltr_model_name": LTR_MODEL_NAME if booster is not None else "none",
                     "ltr_model_backend": LTR_MODEL_BACKEND if booster is not None else "none",
                 })
+                mlflow.log_metric("zero_result_rate", result["zero_result_rate"])
                 for variant in ("rrf", "ltr"):
                     if variant in result:
                         for k, v in result[variant].items():
