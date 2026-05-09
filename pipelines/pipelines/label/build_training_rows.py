@@ -3,7 +3,8 @@
 For every impression we emit one row:
   features = ordered FEATURE_NAMES from pipelines.features
   label    = ESCI gain mapped E=4, S=3, C=2, I=0; 0 if (query, product) is unjudged
-  split    = train | val | test  (deterministic hash on query_id; 80/10/10)
+  split    = ESCI's canonical query split, or a deterministic normalized-query
+             hash fallback for non-ESCI queries
 
 Run pipelines.label.bge_teacher after this job to add offline BGE teacher
 scores and weak pseudo labels for unjudged rows before LTR training.
@@ -24,6 +25,7 @@ import json
 import math
 import os
 import random
+import re
 from collections import Counter, defaultdict
 
 import pandas as pd
@@ -55,15 +57,108 @@ TITLE_BRAND_PSEUDO_LABEL = int(os.getenv("TITLE_BRAND_PSEUDO_LABEL", "2"))
 CATEGORY_FULL_MATCH_PSEUDO_LABEL = int(os.getenv("CATEGORY_FULL_MATCH_PSEUDO_LABEL", "3"))
 CATEGORY_PARTIAL_MATCH_PSEUDO_LABEL = int(os.getenv("CATEGORY_PARTIAL_MATCH_PSEUDO_LABEL", "2"))
 CATEGORY_PARTIAL_MATCH_MIN_COVERAGE = float(os.getenv("CATEGORY_PARTIAL_MATCH_MIN_COVERAGE", "0.5"))
+ATTRIBUTE_MATCH_PSEUDO_LABEL = int(os.getenv("ATTRIBUTE_MATCH_PSEUDO_LABEL", "2"))
+MULTI_ATTRIBUTE_MATCH_PSEUDO_LABEL = int(os.getenv("MULTI_ATTRIBUTE_MATCH_PSEUDO_LABEL", "3"))
+
+ACCESSORY_INTENT_TOKENS = frozenset(
+    {
+        "accessories",
+        "accessory",
+        "care",
+        "cleaner",
+        "cleaning",
+        "cover",
+        "covers",
+        "insole",
+        "insoles",
+        "lace",
+        "laces",
+        "polish",
+        "protector",
+        "protectors",
+        "replacement",
+        "strap",
+        "straps",
+    }
+)
+CORE_PRODUCT_INTENT_TOKENS = frozenset(
+    {
+        "boot",
+        "boots",
+        "sandal",
+        "sandals",
+        "shoe",
+        "shoes",
+        "sneaker",
+        "sneakers",
+    }
+)
+ATTRIBUTE_INTENT_TOKENS = frozenset(
+    {
+        "athletic",
+        "basketball",
+        "baby",
+        "casual",
+        "chelsea",
+        "cotton",
+        "denim",
+        "dress",
+        "formal",
+        "hiking",
+        "infant",
+        "kid",
+        "kids",
+        "leather",
+        "mesh",
+        "running",
+        "slim",
+        "stainless",
+        "steel",
+        "suede",
+        "teen",
+        "toddler",
+        "trail",
+        "training",
+        "walking",
+        "waterproof",
+        "wide",
+        "wool",
+        "workout",
+        "youth",
+    }
+)
+SIZE_RE = re.compile(
+    r"\b\d+(?:\.\d+)?\s?(?:oz|ml|gb|tb|in|cm|mm|kg|lb|l|g)\b",
+    re.IGNORECASE,
+)
 
 
-def split_for(query_id: str) -> str:
-    h = int(hashlib.sha1(query_id.encode()).hexdigest(), 16) % 100
+def split_key_for_query(query: object) -> str:
+    return " ".join(tf.tokenize(str(query or "")))
+
+
+def split_for(query: object) -> str:
+    split_key = split_key_for_query(query)
+    h = int(hashlib.sha1(split_key.encode()).hexdigest(), 16) % 100
     if h < 80:
         return "train"
     if h < 90:
         return "val"
     return "test"
+
+
+def train_val_split_for(query: object) -> str:
+    split_key = split_key_for_query(query)
+    h = int(hashlib.sha1(split_key.encode()).hexdigest(), 16) % 100
+    return "val" if 80 <= h < 90 else "train"
+
+
+def split_from_canonical_esci(query: object, canonical_split: str) -> str:
+    if canonical_split == "test":
+        return "test"
+    if canonical_split == "train":
+        return train_val_split_for(query)
+    return canonical_split
 
 
 def _load_events() -> pd.DataFrame:
@@ -112,6 +207,48 @@ def _load_esci_judgments() -> dict[tuple[str, str], str]:
     return out
 
 
+def _load_esci_query_splits() -> dict[str, str]:
+    """Return {normalized_query_text -> canonical ESCI split}."""
+    with db.conn() as c, c.cursor() as cur:
+        cur.execute("SELECT query, split FROM esci_judgments GROUP BY query, split")
+        rows = cur.fetchall()
+
+    out: dict[str, str] = {}
+    conflicts: dict[str, set[str]] = defaultdict(set)
+    for query, split in rows:
+        key = split_key_for_query(query)
+        existing = out.get(key)
+        if existing is not None and existing != split:
+            conflicts[key].update({existing, split})
+            continue
+        out[key] = split
+
+    if conflicts:
+        examples = ", ".join(
+            f"{key!r}: {sorted(splits)}"
+            for key, splits in list(conflicts.items())[:5]
+        )
+        raise RuntimeError(f"conflicting ESCI splits for normalized queries: {examples}")
+
+    log.info("loaded %d canonical ESCI query splits", len(out))
+    return out
+
+
+def assign_splits(
+    df: pd.DataFrame,
+    esci_query_splits: dict[str, str] | None = None,
+) -> pd.DataFrame:
+    """Assign train/val/test by canonical ESCI query split, then stable query hash."""
+    out = df.copy()
+    split_map = esci_query_splits or {}
+    split_keys = out["query"].apply(split_key_for_query)
+    out["split"] = [
+        split_from_canonical_esci(key, split_map[key]) if key in split_map else split_for(key)
+        for key in split_keys
+    ]
+    return out
+
+
 def _load_user_brand_affinity() -> dict[str, dict[str, float]]:
     """Recompute per-user brand share from clicks (must match user_aggs)."""
     counts: dict[str, Counter[str]] = defaultdict(Counter)
@@ -134,6 +271,52 @@ def _load_user_brand_affinity() -> dict[str, dict[str, float]]:
         out[u] = {brand: cnt / total for brand, cnt in c.items()}
     log.info("computed brand affinity for %d users", len(out))
     return out
+
+
+def _category_text(value: object) -> str:
+    if isinstance(value, (list, tuple)):
+        return " ".join(str(part) for part in value if part)
+    return str(value or "")
+
+
+def _product_type_compatible(query: object, title: object, category_path: object) -> bool:
+    query_tokens = set(tf.tokenize(str(query or "")))
+    if not query_tokens:
+        return True
+    if query_tokens & ACCESSORY_INTENT_TOKENS:
+        return True
+    if not (query_tokens & CORE_PRODUCT_INTENT_TOKENS):
+        return True
+
+    product_tokens = set(tf.tokenize(f"{title or ''} {_category_text(category_path)}"))
+    return bool(product_tokens & CORE_PRODUCT_INTENT_TOKENS) and not bool(
+        product_tokens & ACCESSORY_INTENT_TOKENS
+    )
+
+
+def _size_matches(query: object, text: str) -> bool:
+    query_sizes = {
+        " ".join(tf.tokenize(match.group(0)))
+        for match in SIZE_RE.finditer(str(query or ""))
+    }
+    if not query_sizes:
+        return False
+    text_sizes = {
+        " ".join(tf.tokenize(match.group(0)))
+        for match in SIZE_RE.finditer(text)
+    }
+    return bool(query_sizes & text_sizes)
+
+
+def _text_attribute_match_count(query: object, title: object, category_path: object) -> int:
+    text = f"{title or ''} {_category_text(category_path)}"
+    query_tokens = set(tf.tokenize(str(query or "")))
+    text_tokens = set(tf.tokenize(text))
+
+    matched = len((query_tokens & ATTRIBUTE_INTENT_TOKENS) & text_tokens)
+    if _size_matches(query, text):
+        matched += 1
+    return matched
 
 
 def apply_lexical_relevance_labels(
@@ -182,6 +365,16 @@ def apply_lexical_relevance_labels(
         & (_float_col("query_has_brand") == 0)
         & ~judged_mask
     )
+    if {"title", "category_path"}.issubset(out.columns):
+        product_type_compatible = pd.Series(
+            [
+                _product_type_compatible(q, title, category_path)
+                for q, title, category_path in zip(out["query"], out["title"], out["category_path"])
+            ],
+            index=out.index,
+        )
+        unjudged_category_query = unjudged_category_query & product_type_compatible
+
     category_coverage = _float_col("category_query_token_coverage")
     full_category_match = unjudged_category_query & (category_coverage >= 1.0)
     out.loc[full_category_match, "label"] = out.loc[full_category_match, "label"].clip(
@@ -196,6 +389,33 @@ def apply_lexical_relevance_labels(
     out.loc[partial_category_match, "label"] = out.loc[partial_category_match, "label"].clip(
         lower=CATEGORY_PARTIAL_MATCH_PSEUDO_LABEL
     )
+
+    unjudged_attribute_query = ~judged_mask
+    attribute_match_count = (
+        (_float_col("gender_intent_match") > 0).astype(int)
+        + (_float_col("product_color_match") > 0).astype(int)
+    )
+    if {"title", "category_path"}.issubset(out.columns):
+        text_attribute_counts = pd.Series(
+            [
+                _text_attribute_match_count(q, title, category_path)
+                if _product_type_compatible(q, title, category_path)
+                else 0
+                for q, title, category_path in zip(out["query"], out["title"], out["category_path"])
+            ],
+            index=out.index,
+        )
+        attribute_match_count = attribute_match_count + text_attribute_counts
+
+    single_attribute_match = unjudged_attribute_query & (attribute_match_count == 1)
+    out.loc[single_attribute_match, "label"] = out.loc[single_attribute_match, "label"].clip(
+        lower=ATTRIBUTE_MATCH_PSEUDO_LABEL
+    )
+
+    multi_attribute_match = unjudged_attribute_query & (attribute_match_count >= 2)
+    out.loc[multi_attribute_match, "label"] = out.loc[multi_attribute_match, "label"].clip(
+        lower=MULTI_ATTRIBUTE_MATCH_PSEUDO_LABEL
+    )
     return out
 
 
@@ -207,6 +427,7 @@ def main() -> int:
 
     products = _load_products()
     judgments = _load_esci_judgments()
+    esci_query_splits = _load_esci_query_splits()
     user_brand_aff = _load_user_brand_affinity()
 
     # Score decode
@@ -348,7 +569,12 @@ def main() -> int:
     judged_share = (df["label"] > 0).mean()
     log.info("rows with non-zero ESCI label: %.1f%%", 100 * judged_share)
 
-    df["split"] = df["query_id"].apply(split_for)
+    df = assign_splits(df, esci_query_splits)
+    canonical_split_rows = df["query"].apply(split_key_for_query).isin(esci_query_splits).sum()
+    log.info(
+        "split assignment: canonical_esci_rows=%d hash_fallback_rows=%d",
+        canonical_split_rows, len(df) - canonical_split_rows,
+    )
     log.info("split sizes: %s", df["split"].value_counts().to_dict())
 
     feat_cols = list(FEATURE_NAMES)

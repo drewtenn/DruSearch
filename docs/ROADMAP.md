@@ -19,10 +19,22 @@ Priority label families:
 6. Negative labels: brand/category mismatch, accessory mismatch, adult/kids or
    gender mismatch, out-of-stock products, title stuffing, and low-quality items.
 
-Current item:
+Completed:
 
 - Strengthen category/product-type labeling so queries like `running shoes`
   learn category relevance before broader popularity or semantic similarity
-  signals. The initial category label fix is implemented in
-  `pipelines.label.build_training_rows` with conservative category-only pseudo
-  labels.
+  signals. Category and product-type pseudo labels are implemented in
+  `pipelines.label.build_training_rows` with conservative category-only
+  upgrades and core-product versus accessory compatibility checks.
+
+- Add attribute-intent labels for gender/age, size, color, material, style,
+  and use-case matches so attribute-heavy queries learn precise product
+  relevance before popularity or semantic similarity signals dominate. Initial
+  pseudo labels are implemented in `pipelines.label.build_training_rows` with
+  single-attribute and multi-attribute label floors.
+
+Current item:
+
+- Add commerce-quality labels for availability, price competitiveness,
+  reviews/ratings, return/defect risk, shipping speed, margin, and calibrated
+  popularity.
