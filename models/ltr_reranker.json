@@ -1,0 +1,9 @@
+{
+  "name": "ltr_reranker",
+  "version": "4",
+  "stage": "None",
+  "run_id": "680aea980ec84a8ba2ddfe0466d90056",
+  "source": "s3://mlflow-artifacts/1/680aea980ec84a8ba2ddfe0466d90056/artifacts/model",
+  "model_backend": "lgbm",
+  "feature_schema_version": "v4"
+}

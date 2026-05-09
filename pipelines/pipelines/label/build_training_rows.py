@@ -49,6 +49,12 @@ ANON_MASK_SEED = int(os.getenv("ANON_MASK_SEED", "1337"))
 # between Exact and lower grades.
 ESCI_LABEL = {"I": 0, "C": 2, "S": 3, "E": 4}
 
+BRAND_MATCH_PSEUDO_LABEL = int(os.getenv("BRAND_MATCH_PSEUDO_LABEL", "3"))
+TITLE_BRAND_PSEUDO_LABEL = int(os.getenv("TITLE_BRAND_PSEUDO_LABEL", "2"))
+CATEGORY_FULL_MATCH_PSEUDO_LABEL = int(os.getenv("CATEGORY_FULL_MATCH_PSEUDO_LABEL", "3"))
+CATEGORY_PARTIAL_MATCH_PSEUDO_LABEL = int(os.getenv("CATEGORY_PARTIAL_MATCH_PSEUDO_LABEL", "2"))
+CATEGORY_PARTIAL_MATCH_MIN_COVERAGE = float(os.getenv("CATEGORY_PARTIAL_MATCH_MIN_COVERAGE", "0.5"))
+
 
 def split_for(query_id: str) -> str:
     h = int(hashlib.sha1(query_id.encode()).hexdigest(), 16) % 100
@@ -126,6 +132,63 @@ def _load_user_brand_affinity() -> dict[str, dict[str, float]]:
         total = sum(c.values()) + 1
         out[u] = {brand: cnt / total for brand, cnt in c.items()}
     log.info("computed brand affinity for %d users", len(out))
+    return out
+
+
+def apply_lexical_relevance_labels(
+    df: pd.DataFrame,
+    judged_pairs: set[tuple[str, str]],
+) -> pd.DataFrame:
+    """Upgrade unjudged rows with visible lexical relevance signals.
+
+    These are model-training labels, not serving-time ordering rules. ESCI
+    judgments remain authoritative, including explicit irrelevant judgments.
+    """
+    out = df.copy()
+    judged_mask = pd.Series(
+        [(str(q), str(pid)) in judged_pairs for q, pid in zip(out["query"], out["product_id"])],
+        index=out.index,
+    )
+    def _float_col(name: str) -> pd.Series:
+        if name not in out.columns:
+            return pd.Series(0.0, index=out.index)
+        return out[name].astype(float)
+
+    unjudged_brand_query = (_float_col("query_has_brand") > 0) & ~judged_mask
+
+    brand_match = unjudged_brand_query & (_float_col("product_brand_match") > 0)
+    out.loc[brand_match, "label"] = out.loc[brand_match, "label"].clip(
+        lower=BRAND_MATCH_PSEUDO_LABEL
+    )
+
+    title_match = (
+        unjudged_brand_query
+        & ~brand_match
+        & (_float_col("title_exact_query_match") > 0)
+    )
+    out.loc[title_match, "label"] = out.loc[title_match, "label"].clip(
+        lower=TITLE_BRAND_PSEUDO_LABEL
+    )
+
+    unjudged_category_query = (
+        (_float_col("query_has_category_token") > 0)
+        & (_float_col("query_has_brand") == 0)
+        & ~judged_mask
+    )
+    category_coverage = _float_col("category_query_token_coverage")
+    full_category_match = unjudged_category_query & (category_coverage >= 1.0)
+    out.loc[full_category_match, "label"] = out.loc[full_category_match, "label"].clip(
+        lower=CATEGORY_FULL_MATCH_PSEUDO_LABEL
+    )
+
+    partial_category_match = (
+        unjudged_category_query
+        & ~full_category_match
+        & (category_coverage >= CATEGORY_PARTIAL_MATCH_MIN_COVERAGE)
+    )
+    out.loc[partial_category_match, "label"] = out.loc[partial_category_match, "label"].clip(
+        lower=CATEGORY_PARTIAL_MATCH_PSEUDO_LABEL
+    )
     return out
 
 
@@ -261,8 +324,9 @@ def main() -> int:
     # ESCI label: text key (query_text, product_id)
     keys = list(zip(df["query"], df["product_id"]))
     df["label"] = [ESCI_LABEL.get(judgments.get(k), 0) for k in keys]
+    df = apply_lexical_relevance_labels(df, set(judgments.keys()))
     log.info(
-        "label distribution (ESCI): %s",
+        "label distribution (ESCI + lexical relevance): %s",
         df["label"].value_counts().sort_index().to_dict(),
     )
     judged_share = (df["label"] > 0).mean()
