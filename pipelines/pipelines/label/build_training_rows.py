@@ -1,13 +1,13 @@
-"""Turn raw search_events into LightGBM-ready training rows.
+"""Turn serving-aligned retrieval candidates into LightGBM-ready training rows.
 
-For every impression we emit one row:
+For every offline retrieval candidate we emit one row:
   features = ordered FEATURE_NAMES from pipelines.features
   label    = ESCI gain mapped E=4, S=3, C=2, I=0; 0 if (query, product) is unjudged
   split    = ESCI's canonical query split, or a deterministic normalized-query
              hash fallback for non-ESCI queries
 
-Run pipelines.label.bge_teacher after this job to add offline BGE teacher
-scores and weak pseudo labels for unjudged rows before LTR training.
+Weak pseudo labels are off by default. Set LTR_PSEUDO_LABELS=1 to apply
+train-only lexical pseudo labels with LTR_PSEUDO_LABEL_WEIGHT.
 
 Why ESCI labels and not clicks: with the synthetic click model, P(click) is
 dominated by examination(rank), so a click-trained LTR fits position rather
@@ -21,10 +21,7 @@ Run: docker compose --profile jobs run --rm pipelines \\
 from __future__ import annotations
 
 import hashlib
-import json
-import math
 import os
-import random
 import re
 from collections import Counter, defaultdict
 
@@ -32,17 +29,19 @@ import pandas as pd
 from psycopg.types.json import Json
 
 from pipelines.common import db
+from pipelines.common import training_row_builds
 from pipelines.common.logging import configure
 from pipelines.features import FEATURE_NAMES
+from pipelines.features._generated import SCHEMA_VERSION
+from pipelines.features import ltr_rows
 from pipelines.features import transforms as tf
 
 log = configure("label.build_training_rows")
 
-# Fraction of training rows whose user_id is masked to '' so the model
-# learns "no personalization signal == 0" instead of overfitting on the
-# affinity feature being almost always present. PRD R7 mitigation.
-ANON_MASK_FRACTION = float(os.getenv("ANON_MASK_FRACTION", "0.30"))
-ANON_MASK_SEED = int(os.getenv("ANON_MASK_SEED", "1337"))
+TRAINING_ROW_SOURCE = os.getenv("TRAINING_ROW_SOURCE", "offline_candidates")
+LTR_CAND_N = int(os.getenv("LTR_CAND_N", os.getenv("EVAL_CAND_N", "200")))
+PSEUDO_LABELS_ENABLED = os.getenv("LTR_PSEUDO_LABELS", "0").lower() in {"1", "true", "yes"}
+PSEUDO_LABEL_WEIGHT = float(os.getenv("LTR_PSEUDO_LABEL_WEIGHT", "0.25"))
 
 # ESCI to integer label gain index. label_gain default for LightGBM is
 # [0, 1, 3, 7, 15, ...] (i.e., 2^i - 1 for label i). We use:
@@ -131,6 +130,8 @@ SIZE_RE = re.compile(
     r"\b\d+(?:\.\d+)?\s?(?:oz|ml|gb|tb|in|cm|mm|kg|lb|l|g)\b",
     re.IGNORECASE,
 )
+
+normalize_retrieval_ranks = ltr_rows.normalize_retrieval_ranks
 
 
 def split_key_for_query(query: object) -> str:
@@ -234,6 +235,20 @@ def _load_esci_query_splits() -> dict[str, str]:
     return out
 
 
+def _load_esci_queries() -> pd.DataFrame:
+    with db.conn() as c, c.cursor() as cur:
+        cur.execute(
+            """
+            SELECT query_id, query
+            FROM esci_judgments
+            GROUP BY query_id, query
+            ORDER BY query_id
+            """
+        )
+        rows = cur.fetchall()
+    return pd.DataFrame(rows, columns=["query_id", "query"])
+
+
 def assign_splits(
     df: pd.DataFrame,
     esci_query_splits: dict[str, str] | None = None,
@@ -247,6 +262,124 @@ def assign_splits(
         for key in split_keys
     ]
     return out
+
+
+def build_candidate_training_frame(
+    queries: pd.DataFrame,
+    products: pd.DataFrame,
+    retriever,
+    cand_n: int,
+) -> pd.DataFrame:
+    """Build LTR rows from the same offline candidate distribution used in eval."""
+    brand_tokens, color_tokens, category_tokens = ltr_rows.token_sets(products)
+    frames: list[pd.DataFrame] = []
+    ts = pd.Timestamp.now(tz="UTC")
+
+    for qid, query in zip(queries["query_id"], queries["query"]):
+        hits = retriever.search(str(query), cand_n)
+        if not hits:
+            continue
+        frame = ltr_rows.build_feature_frame(
+            query=str(query),
+            hits=hits,
+            products=products,
+            brand_tokens=brand_tokens,
+            color_tokens=color_tokens,
+            category_tokens=category_tokens,
+            user_brand_affinity=None,
+        )
+        if frame.empty:
+            continue
+        frame.insert(0, "query", str(query))
+        frame.insert(0, "query_id", str(qid))
+        frame["user_id"] = None
+        frame["ts"] = ts
+        frames.append(frame)
+
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
+
+
+def apply_pseudo_labels_for_training(
+    df: pd.DataFrame,
+    judged_pairs: set[tuple[str, str]],
+    *,
+    enabled: bool,
+    pseudo_weight: float,
+) -> pd.DataFrame:
+    """Optionally apply weak labels to train rows only and downweight them."""
+    out = df.copy()
+    if "sample_weight" not in out.columns:
+        out["sample_weight"] = 1.0
+    else:
+        out["sample_weight"] = out["sample_weight"].astype(float)
+
+    if not enabled:
+        return out
+
+    before = out["label"].copy()
+    train_mask = out["split"] == "train"
+    labeled_train = apply_lexical_relevance_labels(out.loc[train_mask], judged_pairs)
+    out.loc[train_mask, "label"] = labeled_train["label"]
+
+    pseudo_mask = train_mask & (before <= 0) & (out["label"] > before)
+    out.loc[pseudo_mask, "sample_weight"] = pseudo_weight
+    return out
+
+
+def apply_supervision(
+    df: pd.DataFrame,
+    judgments: dict[tuple[str, str], str],
+    *,
+    pseudo_labels_enabled: bool,
+    pseudo_weight: float,
+) -> pd.DataFrame:
+    out = df.copy()
+    keys = list(zip(out["query"], out["product_id"]))
+    out["label"] = [ESCI_LABEL.get(judgments.get(k), 0) for k in keys]
+    out["sample_weight"] = 1.0
+    return apply_pseudo_labels_for_training(
+        out,
+        set(judgments.keys()),
+        enabled=pseudo_labels_enabled,
+        pseudo_weight=pseudo_weight,
+    )
+
+
+def ensure_training_rows_schema() -> None:
+    with db.conn() as c, c.cursor() as cur:
+        training_row_builds.ensure_schema(cur)
+        c.commit()
+
+
+def write_training_rows(df: pd.DataFrame, *, build_id: int) -> None:
+    split_counts = {
+        str(split): int(count)
+        for split, count in df["split"].value_counts().sort_index().items()
+    }
+    records = list(zip(
+        df["query_id"], df["product_id"], df["query"], df["user_id"], df["ts"],
+        df["features"].apply(Json), df["label"].astype(float), df["split"],
+        df["sample_weight"].astype(float), [build_id] * len(df),
+    ))
+    with db.conn() as c, c.cursor() as cur:
+        training_row_builds.ensure_schema(cur)
+        cur.executemany(
+            "INSERT INTO training_rows"
+            " (query_id, product_id, query, user_id, ts, features, label, split,"
+            " sample_weight, build_id)"
+            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            records,
+        )
+        training_row_builds.mark_training_row_build_ready_in_cursor(
+            cur,
+            build_id,
+            row_count=int(len(df)),
+            query_count=int(df["query_id"].nunique()),
+            split_counts=split_counts,
+        )
+        c.commit()
 
 
 def _load_user_brand_affinity() -> dict[str, dict[str, float]]:
@@ -420,183 +553,79 @@ def apply_lexical_relevance_labels(
 
 
 def main() -> int:
-    impressions = _load_events()
-    if impressions.empty:
-        log.error("no impression events; run the simulator first")
+    build_id = training_row_builds.begin_training_row_build(
+        source=TRAINING_ROW_SOURCE,
+        feature_schema_version=SCHEMA_VERSION,
+        cand_n=LTR_CAND_N,
+        pseudo_labels_enabled=PSEUDO_LABELS_ENABLED,
+        pseudo_label_weight=PSEUDO_LABEL_WEIGHT,
+        feature_names=list(FEATURE_NAMES),
+    )
+    log.info("started training row build_id=%d", build_id)
+    try:
+        products = _load_products()
+        judgments = _load_esci_judgments()
+        esci_query_splits = _load_esci_query_splits()
+
+        if TRAINING_ROW_SOURCE != "offline_candidates":
+            raise RuntimeError(
+                "unsupported TRAINING_ROW_SOURCE="
+                f"{TRAINING_ROW_SOURCE}; use offline_candidates for serving-aligned LTR rows"
+            )
+
+        from pipelines.evaluate.offline_eval import HybridRetriever
+
+        queries = _load_esci_queries()
+        retriever = HybridRetriever()
+        try:
+            df = build_candidate_training_frame(
+                queries=queries,
+                products=products,
+                retriever=retriever,
+                cand_n=LTR_CAND_N,
+            )
+        finally:
+            retriever.close()
+
+        if df.empty:
+            raise RuntimeError("no offline candidate rows; index products and verify embedder/OpenSearch")
+
+        log.info(
+            "candidate rows: rows=%d queries=%d cand_n=%d avg_rows_per_query=%.1f",
+            len(df),
+            df["query_id"].nunique(),
+            LTR_CAND_N,
+            len(df) / max(df["query_id"].nunique(), 1),
+        )
+
+        df = assign_splits(df, esci_query_splits)
+        df = apply_supervision(
+            df,
+            judgments,
+            pseudo_labels_enabled=PSEUDO_LABELS_ENABLED,
+            pseudo_weight=PSEUDO_LABEL_WEIGHT,
+        )
+        label_source = "ESCI + train pseudo-labels" if PSEUDO_LABELS_ENABLED else "ESCI only"
+        log.info("label distribution (%s): %s", label_source, df["label"].value_counts().sort_index().to_dict())
+        judged_share = (df["label"] > 0).mean()
+        log.info("rows with non-zero label: %.1f%%", 100 * judged_share)
+        log.info("sample weight distribution: %s", df["sample_weight"].value_counts().sort_index().to_dict())
+
+        canonical_split_rows = df["query"].apply(split_key_for_query).isin(esci_query_splits).sum()
+        log.info(
+            "split assignment: canonical_esci_rows=%d hash_fallback_rows=%d",
+            canonical_split_rows, len(df) - canonical_split_rows,
+        )
+        log.info("split sizes: %s", df["split"].value_counts().to_dict())
+
+        log.info("writing %d training_rows build_id=%d", len(df), build_id)
+        write_training_rows(df, build_id=build_id)
+    except Exception as exc:
+        training_row_builds.mark_training_row_build_failed(build_id, exc)
+        log.exception("training row build failed build_id=%d", build_id)
         return 1
 
-    products = _load_products()
-    judgments = _load_esci_judgments()
-    esci_query_splits = _load_esci_query_splits()
-    user_brand_aff = _load_user_brand_affinity()
-
-    # Score decode
-    def _score(d: dict | None, key: str) -> float:
-        if not d:
-            return 0.0
-        return float(d.get(key, 0.0) or 0.0)
-
-    impressions["scores"] = impressions["retrieval_scores"].apply(
-        lambda v: v if isinstance(v, dict) else (json.loads(v) if v else {})
-    )
-    impressions["bm25_score"] = impressions["scores"].apply(lambda d: _score(d, "bm25"))
-    impressions["knn_score"]  = impressions["scores"].apply(lambda d: _score(d, "knn"))
-    impressions["rrf_score"]  = impressions["scores"].apply(lambda d: _score(d, "rrf"))
-
-    impressions["bm25_rank"] = (
-        impressions.groupby("query_id")["bm25_score"]
-        .rank(ascending=False, method="min")
-    )
-    impressions["knn_rank"] = (
-        impressions.groupby("query_id")["knn_score"]
-        .rank(ascending=False, method="min")
-    )
-
-    df = impressions.merge(products, on="product_id", how="left")
-    df["price_log_cents"]      = df["price_cents"].apply(lambda x: math.log1p(float(x or 0)))
-    df["popularity_prior"]     = df["popularity_prior"].fillna(0.0).astype(float)
-    df["title_length_tokens"]  = df["title"].apply(lambda t: float(len(tf.tokenize(t))))
-
-    # Brand / color tokens for interaction features
-    brand_token_set = frozenset(
-        t
-        for b in products["brand"].dropna().unique()
-        if isinstance(b, str) and b
-        for t in tf.brand_tokens(b)
-    )
-    color_token_set = frozenset(
-        t for c in products["color"].dropna().unique()
-        if isinstance(c, str) for t in tf.tokenize(c)
-    )
-    category_token_set = frozenset(
-        t
-        for cp in products["category_path"].dropna()
-        for part in (cp or [])
-        for t in tf.tokenize(part)
-    )
-
-    df["query_length_tokens"]    = df["query"].apply(tf.query_length_tokens)
-    df["query_has_brand"]        = df["query"].apply(lambda q: tf.query_has_brand(q, brand_token_set))
-    df["query_has_color"]        = df["query"].apply(lambda q: tf.query_has_color(q, color_token_set))
-    df["query_has_category_token"] = df["query"].apply(
-        lambda q: tf.query_has_category_token(q, category_token_set)
-    )
-    df["query_has_size_pattern"] = df["query"].apply(tf.query_has_size_pattern)
-    df["query_affordability_intent"] = df["query"].apply(tf.query_affordability_intent)
-    df["affordability_price_score"] = [
-        tf.affordability_price_score(qai, price)
-        for qai, price in zip(df["query_affordability_intent"], df["price_cents"])
-    ]
-    df["query_gender_intent"]    = df["query"].apply(tf.query_gender_intent)
-    df["product_gender"]         = df["category_path"].apply(tf.product_gender)
-    df["gender_intent_match"] = [
-        tf.gender_intent_match(qg, pg)
-        for qg, pg in zip(df["query_gender_intent"], df["product_gender"])
-    ]
-    df["gender_intent_mismatch"] = [
-        tf.gender_intent_mismatch(qg, pg)
-        for qg, pg in zip(df["query_gender_intent"], df["product_gender"])
-    ]
-    df["product_brand_match"] = [
-        tf.product_brand_match(q, b) for q, b in zip(df["query"], df["brand"])
-    ]
-    df["product_brand_token_overlap"] = [
-        tf.product_brand_token_overlap(q, b) for q, b in zip(df["query"], df["brand"])
-    ]
-    df["brand_family_match"] = [
-        tf.brand_family_match(q, b, t)
-        for q, b, t in zip(df["query"], df["brand"], df["title"])
-    ]
-    df["subbrand_title_match"] = [
-        tf.subbrand_title_match(q, t) for q, t in zip(df["query"], df["title"])
-    ]
-    df["product_color_match"] = [
-        tf.product_color_match(q, c) for q, c in zip(df["query"], df["color"])
-    ]
-    df["title_query_token_coverage"] = [
-        tf.query_token_coverage(q, t, brand_token_set)
-        for q, t in zip(df["query"], df["title"])
-    ]
-    df["category_query_token_coverage"] = [
-        tf.query_token_coverage(q, " ".join(cp or []), brand_token_set)
-        for q, cp in zip(df["query"], df["category_path"])
-    ]
-    df["product_category_token_overlap"] = [
-        tf.token_overlap_fraction(q, " ".join(cp or []))
-        for q, cp in zip(df["query"], df["category_path"])
-    ]
-    df["title_exact_query_match"] = [
-        tf.exact_query_phrase_match(q, t) for q, t in zip(df["query"], df["title"])
-    ]
-
-    # Mask a deterministic fraction of (query_id, user_id) pairs to '' so
-    # the model has training signal for the anonymous case. We mask by
-    # query_id (not row) so that a query is consistently anonymous or
-    # personalised — this matches inference where every row of a request
-    # has the same user.
-    rng = random.Random(ANON_MASK_SEED)
-    masked_qids = {
-        qid for qid in df["query_id"].unique()
-        if rng.random() < ANON_MASK_FRACTION
-    }
-    log.info(
-        "anonymous mask: %d/%d queries set to user_id='' (fraction=%.2f)",
-        len(masked_qids), df["query_id"].nunique(), ANON_MASK_FRACTION,
-    )
-    masked_mask = df["query_id"].isin(masked_qids)
-    df.loc[masked_mask, "user_id"] = None
-
-    def _user_brand_aff(u, b):
-        if not u or not b:
-            return 0.0
-        per_brand = user_brand_aff.get(u)
-        if not per_brand:
-            return 0.0
-        return per_brand.get(b, 0.0)
-
-    df["user_brand_affinity"] = [
-        _user_brand_aff(u, b) for u, b in zip(df["user_id"], df["brand"])
-    ]
-
-    # ESCI label: text key (query_text, product_id)
-    keys = list(zip(df["query"], df["product_id"]))
-    df["label"] = [ESCI_LABEL.get(judgments.get(k), 0) for k in keys]
-    df = apply_lexical_relevance_labels(df, set(judgments.keys()))
-    log.info(
-        "label distribution (ESCI + lexical relevance): %s",
-        df["label"].value_counts().sort_index().to_dict(),
-    )
-    judged_share = (df["label"] > 0).mean()
-    log.info("rows with non-zero ESCI label: %.1f%%", 100 * judged_share)
-
-    df = assign_splits(df, esci_query_splits)
-    canonical_split_rows = df["query"].apply(split_key_for_query).isin(esci_query_splits).sum()
-    log.info(
-        "split assignment: canonical_esci_rows=%d hash_fallback_rows=%d",
-        canonical_split_rows, len(df) - canonical_split_rows,
-    )
-    log.info("split sizes: %s", df["split"].value_counts().to_dict())
-
-    feat_cols = list(FEATURE_NAMES)
-    df["features"] = df.apply(
-        lambda r: {name: float(r[name]) for name in feat_cols},
-        axis=1,
-    )
-
-    log.info("writing %d training_rows", len(df))
-    with db.conn() as c, c.cursor() as cur:
-        cur.execute("TRUNCATE training_rows")
-        records = list(zip(
-            df["query_id"], df["product_id"], df["query"], df["user_id"], df["ts"],
-            df["features"].apply(Json), df["label"].astype(float), df["split"],
-        ))
-        cur.executemany(
-            "INSERT INTO training_rows (query_id, product_id, query, user_id, ts, features, label, split)"
-            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-            records,
-        )
-    c.commit()
-    log.info("done")
+    log.info("done build_id=%d", build_id)
     return 0
 
 

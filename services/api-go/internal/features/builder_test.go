@@ -46,6 +46,29 @@ func TestBuildMatrixAffordabilityPriceScoreInactiveWithoutIntent(t *testing.T) {
 	}
 }
 
+func TestBuildMatrixEncodesMissingRanksAsWorseThanSeenRanks(t *testing.T) {
+	hits := []retrieval.Hit{
+		{ProductID: "both", BM25Rank: 1, KNNRank: 2},
+		{ProductID: "bm25_only", BM25Rank: 2, KNNRank: 0},
+		{ProductID: "knn_only", BM25Rank: 0, KNNRank: 1},
+	}
+
+	matrix := BuildMatrix("running shoes", hits, nil, nil)
+
+	if got := matrix[0+IdxBM25Rank]; got != 1 {
+		t.Fatalf("both bm25 rank = %v, want 1", got)
+	}
+	if got := matrix[0+IdxKNNRank]; got != 2 {
+		t.Fatalf("both knn rank = %v, want 2", got)
+	}
+	if got := matrix[NumFeatures+IdxKNNRank]; got != 3 {
+		t.Fatalf("bm25-only knn rank = %v, want 3", got)
+	}
+	if got := matrix[2*NumFeatures+IdxBM25Rank]; got != 3 {
+		t.Fatalf("knn-only bm25 rank = %v, want 3", got)
+	}
+}
+
 func TestQueryTokenCoverageKeepsBrandTokensWhenQueryIsOnlyBrand(t *testing.T) {
 	brands := map[string]struct{}{"jordan": {}}
 

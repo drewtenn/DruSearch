@@ -34,7 +34,7 @@ ESCI_BASE = "https://media.githubusercontent.com/media/amazon-science/esci-data/
 EXAMPLES_FILE = "shopping_queries_dataset_examples.parquet"
 PRODUCTS_FILE = "shopping_queries_dataset_products.parquet"
 
-TARGET_PRODUCTS = int(os.getenv("ESCI_TARGET_PRODUCTS", "10000"))
+TARGET_PRODUCTS = int(os.getenv("ESCI_TARGET_PRODUCTS", "50000"))
 SEED = int(os.getenv("ESCI_SEED", "42"))
 PRODUCT_BATCH_ROWS = int(os.getenv("ESCI_PRODUCT_BATCH_ROWS", "50000"))
 PRODUCT_COLUMNS = [

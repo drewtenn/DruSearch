@@ -3,7 +3,7 @@
 
 package features
 
-const SchemaVersion = "v5"
+const SchemaVersion = "v6"
 
 const (
 	GenBm25Score = 0

@@ -198,7 +198,7 @@ OpenSearch products_v1 with title_vec
 `make seed-catalog` runs `pipelines.ingest.esci`. It caches the Amazon Shopping
 Queries examples and products parquet files, filters to US `small_version`
 query-product examples, selects complete query groups until roughly
-`ESCI_TARGET_PRODUCTS=10000` unique products are covered, and writes the
+`ESCI_TARGET_PRODUCTS=50000` unique products are covered, and writes the
 selected graded judgments to `esci_judgments`. These judgments are used for
 offline evaluation and as authoritative labels when a training impression
 matches the same `(query, product_id)` pair. `make seed-amazon-reviews` remains
@@ -213,7 +213,7 @@ embedder sidecar used at query time and bulk-updates `title_vec`.
 The current ranking loop is:
 
 ```text
-search_events impressions
+ESCI queries
         |
         v
 features.aggregates        features.user_aggs
@@ -225,13 +225,15 @@ Postgres product_features   Redis feat:user:{id}
 label.build_training_rows
         |
         v
-training_rows with v4 feature snapshots and ESCI-derived labels
+training_rows with serving-aligned candidate feature snapshots,
+ESCI-derived labels, sample weights, and required build_id
         |
         v
-label.bge_teacher
+label.bge_teacher (optional)
         |
         v
-training_rows with BGE teacher score/percentile and weak labels for unjudged rows
+training_rows with BGE teacher score/percentile; weak train-only labels only
+when pseudo labels are explicitly enabled
         |
         v
 train.lgbm_ranker -> MLflow registered model
@@ -243,22 +245,35 @@ register.gate -> register.promote -> models/ltr_reranker.{txt,json}
 POST /admin/reload-model
 ```
 
-`label.build_training_rows` emits one row per impression. Labels start from
-ESCI-style judgments: `E=4`, `S=3`, `C=2`, `I/unjudged=0`. LightGBM uses
+`label.build_training_rows` emits one row per candidate from the same
+BM25+kNN+RRF candidate distribution used by serving and offline eval. Labels
+start from ESCI judgments: `E=4`, `S=3`, `C=2`, `I/unjudged=0`. LightGBM uses
 `label_gain=[0,1,3,7,15]`; XGBoost uses `rank:ndcg` with the same integer
-labels. Splits are deterministic by `query_id` hash:
-80 percent train, 10 percent validation, 10 percent test. A deterministic
-30 percent of query groups mask `user_id` to train the anonymous path.
+labels. Splits follow canonical ESCI query splits, with train queries further
+split into train/validation by stable normalized-query hash. Weak lexical
+pseudo labels are disabled by default; when `LTR_PSEUDO_LABELS=1`, they apply
+only to train rows and receive `LTR_PSEUDO_LABEL_WEIGHT`.
+
+Training row generations are tracked in `training_row_builds`. A row build
+clears the previous generation before candidate retrieval begins, inserts rows
+with a required `build_id`, and marks that generation `ready` only after the row
+write commits. Training loads only the latest ready build and verifies the
+source, feature schema version, candidate count, and pseudo-label settings
+against the current environment before it starts a model run.
 
 `label.bge_teacher` runs `BAAI/bge-reranker-v2-m3` offline. It stores
 `bge_teacher_score` and `bge_teacher_percentile` in the row feature JSON for
-audit/debugging, and only upgrades unjudged rows to weak labels. Known
-ESCI-style judgments remain authoritative. The BGE teacher is never used on
-the live `/search` path.
+audit/debugging. It only upgrades unjudged train rows to weak labels when
+`BGE_TEACHER_PSEUDO_LABELS=1` or `LTR_PSEUDO_LABELS=1`, and those rows receive
+a lower `sample_weight`. Known ESCI judgments remain authoritative. The BGE
+teacher is never used on the live `/search` path.
 
 `train.lgbm_ranker` trains the configured backend from `LTR_MODEL_BACKEND`
 (`lgbm` by default, or `xgboost`) and registers it in MLflow. LightGBM logs
-`model_text/model.txt`; XGBoost logs `model_xgboost/model.json`.
+`model_text/model.txt`; XGBoost logs `model_xgboost/model.json`. It also logs
+offline-style RRF baseline metrics and `test_ltr_lift_ndcg_at_10` on the
+offline-eval-eligible ESCI test queries, using all judgments for ideal NDCG and
+recall.
 `register.promote` downloads the matching backend artifact, rewrites LightGBM
 metadata when needed for the Go `leaves` loader, and writes either the served
 `.txt` or `.xgb.json` plus companion `.json` metadata under `models/`. The API
@@ -275,7 +290,8 @@ Postgres tables:
 | `esci_judgments` | Offline evaluation/training judgments from real ESCI query-product labels. |
 | `user_sessions` | Lightweight session metadata. |
 | `search_events` | Append-only impression, click, and purchase events. |
-| `training_rows` | One row per `(query_id, product_id)` impression with feature JSON, label, split, and optional user. |
+| `training_row_builds` | Build manifest for LTR candidate rows: source, feature schema version, candidate count, label strategy settings, row/query counts, status, and metadata. |
+| `training_rows` | One row per `(query_id, product_id)` training candidate with feature JSON, label, split, optional user, sample weight, and required `build_id`. |
 | `product_features` | Product-level aggregate counters and CTR priors. |
 | `ingest_runs` | Pipeline run bookkeeping. |
 
@@ -437,7 +453,7 @@ personalized and non-personalized paths.
 | 1 - BM25 search | done | `make seed-databases && curl '/search?q=running+shoes'` |
 | 2 - Hybrid retrieval | done | `make embed-vectors`, then semantic queries use BM25+kNN+RRF. |
 | 3 - Event ingest + simulator | done | `make simulate` writes impressions, clicks, and purchases. |
-| 4 - LTR training | done | `make build-training-rows && make label-bge-teacher && make train-ltr`. |
+| 4 - LTR training | done | `make build-training-rows && make train-ltr`. |
 | 5 - LTR serving in Go | done | `ranker=ltr`, `mode="hybrid+ltr"`, hot reload from `models/`. |
 | 6 - Personalization | done | Redis `feat:user:{id}` supplies `user_brand_affinity`. |
 | 7 - Observability + promotion safety | done | `/metrics`, embedder circuit breaker, `register.gate`, runbook. |

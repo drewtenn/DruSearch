@@ -14,7 +14,6 @@ Run: docker compose --profile jobs run --rm pipelines \\
 
 from __future__ import annotations
 
-import math
 import os
 import time
 from dataclasses import dataclass
@@ -29,6 +28,7 @@ from pipelines.common import db
 from pipelines.common.config import load, normalize_ltr_model_backend
 from pipelines.common.logging import configure
 from pipelines.features import FEATURE_NAMES
+from pipelines.features import ltr_rows
 from pipelines.features import transforms as tf
 
 log = configure("evaluate.offline")
@@ -177,7 +177,7 @@ class HybridRetriever:
             d["knn_rank"] = i + 1
             d["rrf"] += 1.0 / (60 + i + 1)
 
-        out = list(merged.values())
+        out = ltr_rows.normalize_retrieval_ranks(merged.values())
         out.sort(key=lambda d: -d["rrf"])
         return out
 
@@ -187,65 +187,19 @@ class HybridRetriever:
 # ---------------------------------------------------------------------------
 
 def build_feature_matrix(query: str, hits: list[dict], cat: Catalog) -> np.ndarray:
-    n = len(hits)
-    X = np.zeros((n, len(FEATURE_NAMES)), dtype=np.float32)
-
-    qlen   = float(len(tf.tokenize(query)))
-    qbrand = tf.query_has_brand(query, cat.brand_tokens)
-    qcolor = tf.query_has_color(query, cat.color_tokens)
-    qcategory = tf.query_has_category_token(query, cat.category_tokens)
-    qsize  = tf.query_has_size_pattern(query)
-    qgender = tf.query_gender_intent(query)
-    qaffordability = tf.query_affordability_intent(query)
-
-    feat_index = {name: i for i, name in enumerate(FEATURE_NAMES)}
-    for row, h in enumerate(hits):
-        pid = h["product_id"]
-
-        prod = cat.products.loc[pid] if pid in cat.products.index else None
-        title = "" if prod is None else (prod["title"] or "")
-        brand = "" if prod is None else (prod["brand"] or "")
-        color = "" if prod is None else (prod["color"] or "")
-        category_path = [] if prod is None else (prod["category_path"] or [])
-        category_text = " ".join(category_path)
-        price = 0.0 if prod is None else float(prod["price_cents"] or 0)
-        pop   = 0.0 if prod is None else float(prod["popularity_prior"] or 0)
-        pgender = tf.product_gender(category_path)
-
-        X[row, feat_index["bm25_score"]]             = h["bm25"]
-        X[row, feat_index["bm25_rank"]]              = h["bm25_rank"]
-        X[row, feat_index["knn_score"]]              = h["knn"]
-        X[row, feat_index["knn_rank"]]               = h["knn_rank"]
-        X[row, feat_index["rrf_score"]]              = h["rrf"]
-        X[row, feat_index["popularity_prior"]]       = pop
-        X[row, feat_index["price_log_cents"]]        = math.log1p(price)
-        X[row, feat_index["title_length_tokens"]]    = float(len(tf.tokenize(title)))
-        X[row, feat_index["query_length_tokens"]]    = qlen
-        X[row, feat_index["query_has_brand"]]        = qbrand
-        X[row, feat_index["query_has_color"]]        = qcolor
-        X[row, feat_index["query_has_category_token"]] = qcategory
-        X[row, feat_index["query_has_size_pattern"]] = qsize
-        X[row, feat_index["query_gender_intent"]] = qgender
-        X[row, feat_index["product_gender"]] = pgender
-        X[row, feat_index["gender_intent_match"]] = tf.gender_intent_match(qgender, pgender)
-        X[row, feat_index["gender_intent_mismatch"]] = tf.gender_intent_mismatch(qgender, pgender)
-        X[row, feat_index["product_brand_match"]] = tf.product_brand_match(query, brand)
-        X[row, feat_index["product_brand_token_overlap"]] = tf.product_brand_token_overlap(query, brand)
-        X[row, feat_index["product_color_match"]] = tf.product_color_match(query, color)
-        X[row, feat_index["title_query_token_coverage"]] = tf.query_token_coverage(query, title, cat.brand_tokens)
-        X[row, feat_index["category_query_token_coverage"]] = tf.query_token_coverage(query, category_text, cat.brand_tokens)
-        X[row, feat_index["product_category_token_overlap"]] = tf.product_category_token_overlap(query, category_text)
-        X[row, feat_index["title_exact_query_match"]] = tf.exact_query_phrase_match(query, title)
-        X[row, feat_index["query_affordability_intent"]] = qaffordability
-        X[row, feat_index["affordability_price_score"]] = tf.affordability_price_score(qaffordability, price)
-        X[row, feat_index["brand_family_match"]] = tf.brand_family_match(query, brand, title)
-        X[row, feat_index["subbrand_title_match"]] = tf.subbrand_title_match(query, title)
-        # user_brand_affinity: ESCI eval has no user identity; leave at 0.
-        # Phase 6 personalization is demoed via per-user /search calls,
-        # not folded into the ESCI relevance benchmark.
-        if "user_brand_affinity" in feat_index:
-            X[row, feat_index["user_brand_affinity"]] = 0.0
-
+    frame = ltr_rows.build_feature_frame(
+        query=query,
+        hits=hits,
+        products=cat.products,
+        brand_tokens=cat.brand_tokens,
+        color_tokens=cat.color_tokens,
+        category_tokens=cat.category_tokens,
+        user_brand_affinity=None,
+    )
+    X = np.zeros((len(frame), len(FEATURE_NAMES)), dtype=np.float32)
+    for i, features in enumerate(frame["features"]):
+        for j, name in enumerate(FEATURE_NAMES):
+            X[i, j] = float(features.get(name, 0.0) or 0.0)
     return X
 
 

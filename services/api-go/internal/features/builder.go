@@ -79,13 +79,14 @@ func BuildMatrix(query string, hits []retrieval.Hit, vocab *Vocab, user *UserFea
 	if user != nil {
 		brandAff = user.BrandAff
 	}
+	missingRank := missingRetrievalRank(hits)
 
 	for i, h := range hits {
 		off := i * NumFeatures
 		out[off+IdxBM25Score] = h.BM25
-		out[off+IdxBM25Rank] = float64(h.BM25Rank)
+		out[off+IdxBM25Rank] = float64(rankFeature(h.BM25Rank, missingRank))
 		out[off+IdxKNNScore] = h.KNN
-		out[off+IdxKNNRank] = float64(h.KNNRank)
+		out[off+IdxKNNRank] = float64(rankFeature(h.KNNRank, missingRank))
 		out[off+IdxRRFScore] = h.RRF
 		out[off+IdxPopularityPrior] = h.PopularityPrior
 		out[off+IdxPriceLogCents] = math.Log1p(float64(h.PriceCents))
@@ -117,4 +118,27 @@ func BuildMatrix(query string, hits []retrieval.Hit, vocab *Vocab, user *UserFea
 		out[off+IdxSubbrandTitleMatch] = SubbrandTitleMatch(query, h.Title)
 	}
 	return out
+}
+
+func missingRetrievalRank(hits []retrieval.Hit) int {
+	maxRank := 0
+	for _, h := range hits {
+		if h.BM25Rank > maxRank {
+			maxRank = h.BM25Rank
+		}
+		if h.KNNRank > maxRank {
+			maxRank = h.KNNRank
+		}
+	}
+	if maxRank <= 0 {
+		return len(hits) + 1
+	}
+	return maxRank + 1
+}
+
+func rankFeature(rank, missingRank int) int {
+	if rank > 0 {
+		return rank
+	}
+	return missingRank
 }

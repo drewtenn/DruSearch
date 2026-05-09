@@ -27,7 +27,7 @@ make simulate                              # ~8min for 200 users * 50 queries
 # Phase 4+: train + serve
 $(MAKE) -C . refresh-user-features         # per-user brand affinity -> Redis
 docker compose --profile jobs run --rm pipelines python -m pipelines.features.aggregates
-docker compose --profile jobs run --rm pipelines python -m pipelines.label.build_training_rows
+docker compose --profile jobs run --rm pipelines python -m pipelines.label.build_training_rows  # ESCI queries -> serving-aligned candidates
 make train-ltr                             # configured LTR backend, MLflow run
 make promote-model                         # writes model.txt to shared volume
 make reload-model                          # api hot-reload
@@ -54,6 +54,29 @@ training and serving backend. LightGBM promotion writes
 `models/ltr_reranker.txt`; XGBoost promotion writes
 `models/ltr_reranker.xgb.json`. Both write `models/ltr_reranker.json`
 metadata for API reload.
+
+LTR training rows are built from the same BM25+kNN+RRF candidate distribution
+used by offline eval and serving, not from logged top-k impressions. Labels are
+ESCI-only by default for train/validation/test. Optional pseudo labels require
+`LTR_PSEUDO_LABELS=1`; they apply only to train rows and use
+`LTR_PSEUDO_LABEL_WEIGHT` (`0.25` default). `make label-bge-teacher` is a
+manual offline scoring step; it stores BGE teacher features by default and only
+adds train-only pseudo labels when `BGE_TEACHER_PSEUDO_LABELS=1` or
+`LTR_PSEUDO_LABELS=1`.
+
+`build-training-rows` invalidates the old `training_rows` generation before
+candidate retrieval begins, records the run in `training_row_builds`, and marks
+that build `ready` only after rows are written with its `build_id`. `train-ltr`
+refuses to train unless the latest ready build matches the current feature
+schema, candidate count, source, and pseudo-label settings. If training reports
+a stale or missing training-row build, rerun `make build-training-rows` with the
+same LTR environment you will use for training.
+
+Training logs include offline-style RRF baseline diagnostics on the
+offline-eval-eligible ESCI test queries:
+`test_rrf_ndcg_at_5`, `test_rrf_ndcg_at_10`, and
+`test_ltr_lift_ndcg_at_10`. Treat negative lift as a model-quality regression,
+even if standalone LTR metrics look reasonable.
 
 ## Observability
 
@@ -99,13 +122,17 @@ Either no model file is on the shared volume, or the configured scorer rejected 
 
 ### `incorrect number of columns` from leaves
 
-Feature schema in Python and Go is out of sync. Rebuild the api image after any change to either `pipelines/features/__init__.py` or `services/api-go/internal/features/schema.go`. Both must list the same names in the same order.
+Feature schema in Python and Go is out of sync. Run `make regen-feature-schema`
+and `make check-feature-parity`, then rebuild the api image. Python and Go must
+list the same names in the same order.
 
 ### Promotion gate fails
 
 `make` against `pipelines.register.gate` returns exit 2 when `cand_NDCG@10 < prod_NDCG@10 - PROMOTE_TOL_NDCG`. Either:
 - accept the regression by re-running with `PROMOTE_TOL_NDCG=0.05` (and document why), or
-- iterate on the model (more data, hyperparam tuning, IPS weighting).
+- iterate on the model. First check `test_ltr_lift_ndcg_at_10` against the
+  offline-style RRF baseline, then look at candidate coverage, label coverage,
+  and sample-weight settings before tuning hyperparameters.
 
 ## Deliberately scoped out
 

@@ -37,9 +37,9 @@ class FeatureDef:
 # the API, training rows, and model before serving these indices.
 FEATURES: tuple[FeatureDef, ...] = (
     FeatureDef("bm25_score", Source.RETRIEVAL, "BM25 raw score"),
-    FeatureDef("bm25_rank", Source.RETRIEVAL, "BM25 rank within query; 0 if absent"),
+    FeatureDef("bm25_rank", Source.RETRIEVAL, "BM25 rank within query; absent encoded as max observed rank + 1"),
     FeatureDef("knn_score", Source.RETRIEVAL, "k-NN cosine similarity"),
-    FeatureDef("knn_rank", Source.RETRIEVAL, "k-NN rank within query; 0 if absent"),
+    FeatureDef("knn_rank", Source.RETRIEVAL, "k-NN rank within query; absent encoded as max observed rank + 1"),
     FeatureDef("rrf_score", Source.RETRIEVAL, "RRF fused retrieval score"),
     FeatureDef("popularity_prior", Source.STATIC_PRODUCT, "Catalog popularity prior in [0,1]"),
     FeatureDef("price_log_cents", Source.STATIC_PRODUCT, "log1p(price_cents)"),

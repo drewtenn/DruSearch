@@ -174,7 +174,7 @@ def test_schema_matches_generated():
         f"FEATURE_NAMES drift: {FEATURE_NAMES} vs {gen.FEATURE_NAMES}"
     )
     assert NUM_FEATURES == gen.NUM_FEATURES
-    assert gen.SCHEMA_VERSION == "v5"
+    assert gen.SCHEMA_VERSION == "v6"
 
 
 def test_query_token_coverage_keeps_brand_tokens_when_query_is_only_brand():

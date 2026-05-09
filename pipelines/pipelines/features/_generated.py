@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-SCHEMA_VERSION = "v5"
+SCHEMA_VERSION = "v6"
 
 @dataclass(frozen=True)
 class GeneratedFeature:
@@ -17,9 +17,9 @@ class GeneratedFeature:
 
 FEATURES: tuple[GeneratedFeature, ...] = (
     GeneratedFeature(index=0, name="bm25_score", kind="FLOAT", source="RETRIEVAL", description="BM25 raw score"),
-    GeneratedFeature(index=1, name="bm25_rank", kind="INT", source="RETRIEVAL", description="BM25 rank within query; 0 if absent"),
+    GeneratedFeature(index=1, name="bm25_rank", kind="INT", source="RETRIEVAL", description="BM25 rank within query; absent encoded as max observed rank + 1"),
     GeneratedFeature(index=2, name="knn_score", kind="FLOAT", source="RETRIEVAL", description="k-NN cosine similarity"),
-    GeneratedFeature(index=3, name="knn_rank", kind="INT", source="RETRIEVAL", description="k-NN rank within query; 0 if absent"),
+    GeneratedFeature(index=3, name="knn_rank", kind="INT", source="RETRIEVAL", description="k-NN rank within query; absent encoded as max observed rank + 1"),
     GeneratedFeature(index=4, name="rrf_score", kind="FLOAT", source="RETRIEVAL", description="RRF fused retrieval score"),
     GeneratedFeature(index=5, name="popularity_prior", kind="FLOAT", source="STATIC_PRODUCT", description="Catalog popularity prior in [0,1]"),
     GeneratedFeature(index=6, name="price_log_cents", kind="FLOAT", source="STATIC_PRODUCT", description="log1p(price_cents)"),

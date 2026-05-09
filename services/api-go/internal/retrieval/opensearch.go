@@ -228,11 +228,12 @@ func (e *Engine) Hybrid(ctx context.Context, query string, vec []float32, candN,
 		rrf      float64
 	}
 	merged := make(map[string]*fused, candN)
+	missingRank := candN + 1
 
 	for i, h := range bm25 {
 		f, ok := merged[h.ID]
 		if !ok {
-			f = &fused{src: h.Source}
+			f = &fused{src: h.Source, bm25Rank: missingRank, knnRank: missingRank}
 			merged[h.ID] = f
 		}
 		f.bm25 = h.Score
@@ -242,7 +243,7 @@ func (e *Engine) Hybrid(ctx context.Context, query string, vec []float32, candN,
 	for i, h := range knn {
 		f, ok := merged[h.ID]
 		if !ok {
-			f = &fused{src: h.Source}
+			f = &fused{src: h.Source, bm25Rank: missingRank, knnRank: missingRank}
 			merged[h.ID] = f
 		}
 		f.knn = h.Score

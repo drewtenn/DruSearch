@@ -1,9 +1,10 @@
-"""Use BGE offline as a teacher for LTR training rows.
+"""Use BGE offline as an optional teacher for LTR training rows.
 
 This job intentionally keeps the cross-encoder out of the search hot path.
 It scores existing training rows offline, stores the raw teacher score in the
-row's JSON feature snapshot for audit/debugging, and upgrades only unjudged
-rows to low-confidence pseudo labels. Known ESCI judgments remain authoritative.
+row's JSON feature snapshot for audit/debugging, and can optionally upgrade
+train-only unjudged rows to low-confidence pseudo labels. Known ESCI judgments
+remain authoritative.
 
 Run: docker compose --profile jobs run --rm pipelines \\
         python -m pipelines.label.bge_teacher
@@ -30,6 +31,13 @@ BGE_TEACHER_MODEL = os.getenv("BGE_TEACHER_MODEL", "BAAI/bge-reranker-v2-m3")
 BGE_TEACHER_DEVICE = os.getenv("BGE_TEACHER_DEVICE", "auto")
 BGE_TEACHER_BATCH_SIZE = int(os.getenv("BGE_TEACHER_BATCH_SIZE", "32"))
 BGE_TEACHER_MAX_ROWS = int(os.getenv("BGE_TEACHER_MAX_ROWS", "0"))
+BGE_TEACHER_PSEUDO_LABELS = os.getenv(
+    "BGE_TEACHER_PSEUDO_LABELS",
+    os.getenv("LTR_PSEUDO_LABELS", "0"),
+).lower() in {"1", "true", "yes"}
+BGE_TEACHER_PSEUDO_LABEL_WEIGHT = float(
+    os.getenv("BGE_TEACHER_PSEUDO_LABEL_WEIGHT", os.getenv("LTR_PSEUDO_LABEL_WEIGHT", "0.25"))
+)
 
 
 def product_text(row: pd.Series) -> str:
@@ -89,13 +97,21 @@ def _coerce_features(value: object) -> dict[str, float]:
 def add_teacher_labels(
     rows: pd.DataFrame,
     judged_pairs: set[tuple[str, str]],
+    *,
+    pseudo_labels_enabled: bool = False,
+    pseudo_weight: float = 0.25,
 ) -> pd.DataFrame:
-    """Attach BGE teacher scores and update labels for unjudged rows only."""
+    """Attach BGE teacher scores and optionally update train-only unjudged rows."""
     out = rows.copy()
     out["bge_teacher_percentile"] = teacher_percentiles(out)
+    if "sample_weight" not in out.columns:
+        out["sample_weight"] = 1.0
+    else:
+        out["sample_weight"] = out["sample_weight"].astype(float)
 
     features: list[dict[str, float]] = []
     labels: list[float] = []
+    weights: list[float] = []
     for row in out.itertuples(index=False):
         feature_map = _coerce_features(getattr(row, "features", {}))
         score = float(getattr(row, "bge_teacher_score"))
@@ -106,21 +122,42 @@ def add_teacher_labels(
 
         base_label = float(getattr(row, "label"))
         pair = (str(getattr(row, "query")), str(getattr(row, "product_id")))
-        if pair in judged_pairs:
-            labels.append(base_label)
+        sample_weight = float(getattr(row, "sample_weight", 1.0))
+        split = str(getattr(row, "split", ""))
+        pseudo_grade = teacher_grade(percentile)
+        if (
+            pseudo_labels_enabled
+            and split == "train"
+            and pair not in judged_pairs
+            and pseudo_grade > base_label
+        ):
+            labels.append(pseudo_grade)
+            sample_weight = pseudo_weight
         else:
-            labels.append(max(base_label, teacher_grade(percentile)))
+            labels.append(base_label)
+        weights.append(sample_weight)
 
     out["features"] = features
     out["label"] = labels
+    out["sample_weight"] = weights
     return out
 
 
+def ensure_training_rows_schema() -> None:
+    with db.conn() as c, c.cursor() as cur:
+        cur.execute(
+            "ALTER TABLE training_rows "
+            "ADD COLUMN IF NOT EXISTS sample_weight REAL NOT NULL DEFAULT 1"
+        )
+        c.commit()
+
+
 def _load_training_rows() -> pd.DataFrame:
+    ensure_training_rows_schema()
     with db.conn() as c, c.cursor() as cur:
         cur.execute(
             """
-            SELECT query_id, product_id, query, features, label
+            SELECT query_id, product_id, query, features, label, split, sample_weight
             FROM training_rows
             ORDER BY query_id, product_id
             """
@@ -185,6 +222,7 @@ def _write_rows(rows: pd.DataFrame) -> None:
         zip(
             rows["features"].apply(Json),
             rows["label"].astype(float),
+            rows["sample_weight"].astype(float),
             rows["query_id"],
             rows["product_id"],
         )
@@ -193,7 +231,7 @@ def _write_rows(rows: pd.DataFrame) -> None:
         cur.executemany(
             """
             UPDATE training_rows
-            SET features = %s, label = %s
+            SET features = %s, label = %s, sample_weight = %s
             WHERE query_id = %s AND product_id = %s
             """,
             records,
@@ -213,13 +251,24 @@ def main() -> int:
     df["document_text"] = df.apply(product_text, axis=1)
     df["bge_teacher_score"] = score_with_bge(df)
 
-    labelled = add_teacher_labels(df, judged_pairs=judged_pairs)
+    labelled = add_teacher_labels(
+        df,
+        judged_pairs=judged_pairs,
+        pseudo_labels_enabled=BGE_TEACHER_PSEUDO_LABELS,
+        pseudo_weight=BGE_TEACHER_PSEUDO_LABEL_WEIGHT,
+    )
+    label_source = "BGE train pseudo-labels enabled" if BGE_TEACHER_PSEUDO_LABELS else "BGE scores only"
     log.info(
-        "label distribution after BGE distillation: %s",
+        "label distribution after BGE distillation (%s): %s",
+        label_source,
         labelled["label"].value_counts().sort_index().to_dict(),
     )
+    log.info(
+        "sample weight distribution after BGE distillation: %s",
+        labelled["sample_weight"].value_counts().sort_index().to_dict(),
+    )
     _write_rows(labelled)
-    log.info("updated %d training rows with offline BGE teacher labels", len(labelled))
+    log.info("updated %d training rows with offline BGE teacher features", len(labelled))
     return 0
 
 

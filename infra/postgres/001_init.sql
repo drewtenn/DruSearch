@@ -74,6 +74,21 @@ CREATE INDEX IF NOT EXISTS search_events_product_idx  ON search_events(product_i
 -- ---------------------------------------------------------------------------
 -- Offline feature snapshots (LTR training rows)
 -- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS training_row_builds (
+  build_id               BIGSERIAL PRIMARY KEY,
+  started_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at            TIMESTAMPTZ,
+  status                 TEXT        NOT NULL CHECK (status IN ('running', 'ready', 'failed')),
+  source                 TEXT        NOT NULL,
+  feature_schema_version TEXT        NOT NULL,
+  cand_n                 INTEGER     NOT NULL,
+  pseudo_labels_enabled  BOOLEAN     NOT NULL,
+  pseudo_label_weight    REAL        NOT NULL,
+  row_count              INTEGER     NOT NULL DEFAULT 0,
+  query_count            INTEGER     NOT NULL DEFAULT 0,
+  metadata               JSONB       NOT NULL DEFAULT '{}'::jsonb
+);
+
 CREATE TABLE IF NOT EXISTS training_rows (
   query_id    TEXT        NOT NULL,
   product_id  TEXT        NOT NULL,
@@ -83,8 +98,12 @@ CREATE TABLE IF NOT EXISTS training_rows (
   features    JSONB       NOT NULL,
   label       REAL        NOT NULL,
   split       TEXT        NOT NULL CHECK (split IN ('train','val','test')),
+  sample_weight REAL      NOT NULL DEFAULT 1,
+  build_id    BIGINT      NOT NULL REFERENCES training_row_builds(build_id),
   PRIMARY KEY (query_id, product_id)
 );
+CREATE INDEX IF NOT EXISTS training_rows_build_id_idx ON training_rows(build_id);
+CREATE INDEX IF NOT EXISTS training_row_builds_status_build_id_idx ON training_row_builds(status, build_id DESC);
 
 -- ---------------------------------------------------------------------------
 -- Product-level offline features (refreshed daily)

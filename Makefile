@@ -119,9 +119,9 @@ simulate: ## Generate fake searches, clicks, and purchases for training data
 
 ##@ Phase 4 — teach and check a ranking model
 .PHONY: build-training-rows label-bge-teacher label-bge-teacher-docker host-pipeline-venv check-host-mps label-bge-teacher-host train-ltr retrain-model retrain-model-with-schema retrain-model-with-sim eval compare-ltr-backends
-build-training-rows: ## Convert logged behavior into examples the model can learn from
+build-training-rows: ## Build serving-aligned ESCI candidate rows for LTR
 	$(COMPOSE) run --rm pipelines python -m pipelines.label.build_training_rows
-label-bge-teacher: label-bge-teacher-host ## Score training rows with offline BGE on the host/MPS path
+label-bge-teacher: label-bge-teacher-host ## Score training rows with offline BGE on the host/MPS path; pseudo labels require opt-in
 label-bge-teacher-docker: ## Score training rows with offline BGE in Docker using CPU PyTorch
 	$(COMPOSE) --profile jobs run --rm pipelines python -m pipelines.label.bge_teacher
 host-pipeline-venv: ## Create/update a local Python env for host-run pipelines
@@ -154,7 +154,7 @@ label-bge-teacher-host: host-pipeline-venv check-host-mps ## Run BGE teacher on 
 	$(HOST_PIPELINE_PYTHON) -m pipelines.label.bge_teacher
 train-ltr: ## Train the configured LTR model backend to reorder search results
 	$(COMPOSE) run --rm pipelines python -m pipelines.train.lgbm_ranker
-retrain-model: refresh-product-features refresh-user-features build-training-rows label-bge-teacher train-ltr promote-model verify-promoted-model reload-model ## Retrain and reload LTR from existing events
+retrain-model: refresh-product-features refresh-user-features build-training-rows train-ltr promote-model verify-promoted-model reload-model ## Retrain and reload LTR from serving-aligned ESCI candidates
 retrain-model-with-schema: ## Regenerate shared feature schema, then retrain and reload LTR
 	$(MAKE) regen-feature-schema
 	$(MAKE) check-feature-parity
@@ -162,7 +162,7 @@ retrain-model-with-schema: ## Regenerate shared feature schema, then retrain and
 retrain-model-with-sim: simulate retrain-model ## Generate fresh simulated events, then retrain and reload LTR
 eval: ## Measure ranking quality without changing the live API
 	$(COMPOSE) run --rm pipelines python -m pipelines.evaluate.offline_eval
-compare-ltr-backends: ## Train and evaluate LightGBM and XGBoost from the same current training rows
+compare-ltr-backends: build-training-rows ## Rebuild training rows, then train/evaluate LightGBM and XGBoost
 	@set -euo pipefail; \
 	run_dir="reports/ltr-backends/$$(date +%Y%m%d-%H%M%S)"; \
 	mkdir -p "$$run_dir"; \
