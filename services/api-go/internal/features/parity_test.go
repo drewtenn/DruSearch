@@ -114,9 +114,9 @@ func TestInteractionParityFixtures(t *testing.T) {
 			if qg != c.Expected.QueryGenderIntent {
 				t.Errorf("QueryGenderIntent(%q) = %v, want %v", c.Query, qg, c.Expected.QueryGenderIntent)
 			}
-			pg := ProductGender(c.CategoryPath)
+			pg := ProductGender(c.CategoryPath, c.ProductTitle)
 			if pg != c.Expected.ProductGender {
-				t.Errorf("ProductGender(%#v) = %v, want %v", c.CategoryPath, pg, c.Expected.ProductGender)
+				t.Errorf("ProductGender(%#v, %q) = %v, want %v", c.CategoryPath, c.ProductTitle, pg, c.Expected.ProductGender)
 			}
 			if v := GenderIntentMatch(qg, pg); v != c.Expected.GenderIntentMatch {
 				t.Errorf("GenderIntentMatch(%v, %v) = %v, want %v", qg, pg, v, c.Expected.GenderIntentMatch)

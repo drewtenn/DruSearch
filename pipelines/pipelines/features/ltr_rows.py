@@ -99,10 +99,13 @@ def build_feature_frame(
         brand = "" if prod is None else (prod["brand"] or "")
         color = "" if prod is None else (prod["color"] or "")
         category_path = [] if prod is None else (prod["category_path"] or [])
+        derived_gender = ""
+        if prod is not None and "derived_gender" in prod:
+            derived_gender = prod["derived_gender"] or ""
         category_text = " ".join(category_path)
         price = 0.0 if prod is None else float(prod["price_cents"] or 0)
         pop = 0.0 if prod is None else float(prod["popularity_prior"] or 0)
-        pgender = tf.product_gender(category_path)
+        pgender = tf.product_gender_label(derived_gender) or tf.product_gender(category_path, title)
 
         row = {
             "product_id": pid,

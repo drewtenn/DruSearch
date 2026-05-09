@@ -144,10 +144,14 @@ Concrete trace for `GET /search?q=running+shoes&k=10&ranker=ltr`:
    BM25-only and starts with `mode: "bm25"`.
 3. Retrieval runs against OpenSearch:
    - BM25: `multi_match` over `title^2`, `category_path^2`, `category^1.5`,
-     `bullets`, and `description`.
+     `bullets`, and `description`. Gendered queries wrap that base query in a
+     soft boost against indexed `derived_gender`; matching gender is boosted,
+     unisex partially matches men's and women's queries, and known opposite
+     genders are demoted rather than filtered out.
    - kNN: Lucene HNSW over `title_vec`, when embedding is available.
-   - Structured query intent, including gender, stays in ranking features rather
-     than hard retrieval filters so sparse catalog metadata cannot zero results.
+   - Structured query intent, including gender, stays as soft retrieval and
+     ranking evidence rather than hard filters so sparse or ambiguous catalog
+     metadata cannot zero results.
 4. Hybrid retrieval fuses BM25 and kNN with client-side RRF:
    `score(d) = sum(1 / (rrf_k + rank(d)))`, with `rrf_k=60` by default.
 5. If the ranker is `ltr` and a model is loaded, the API builds the v4 feature
@@ -303,6 +307,7 @@ OpenSearch index `products_v1`:
 | `title`, `description`, `bullets` | text with custom English analyzer | Postgres |
 | `brand`, `color`, `category` | keyword | Postgres |
 | `category_path` | text plus `.raw` keyword | Postgres |
+| `derived_gender` | keyword | Ingestion-derived from category path, then title |
 | `price_cents` | integer | Postgres |
 | `popularity_prior`, `ctr_prior` | float | Postgres / aggregates |
 | `title_vec` | `knn_vector(384)`, Lucene HNSW cosine similarity | Embedder sidecar |
@@ -330,7 +335,7 @@ Python trains the ranker and Go serves it, so feature ordering and transforms
 must stay identical.
 
 The source of truth is `libs/schema/feature_schema.json`, currently schema
-`v4` with 27 ordered features:
+`v7` with 29 ordered features:
 
 | Indexes | Source | Features |
 |---|---|---|

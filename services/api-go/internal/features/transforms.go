@@ -8,11 +8,12 @@ import (
 )
 
 const (
-	GenderNone  = 0.0
-	GenderMen   = 1.0
-	GenderWomen = 2.0
-	GenderBoys  = 3.0
-	GenderGirls = 4.0
+	GenderNone   = 0.0
+	GenderMen    = 1.0
+	GenderWomen  = 2.0
+	GenderBoys   = 3.0
+	GenderGirls  = 4.0
+	GenderUnisex = 5.0
 )
 
 // Tokenize splits on Unicode word boundaries (matches Python re.findall(r"\w+")
@@ -118,30 +119,46 @@ func affordabilityToken(t string) bool {
 	}
 }
 
-func ProductGender(categoryPath []string) float64 {
+func ProductGender(categoryPath []string, title string) float64 {
 	for _, part := range categoryPath {
-		switch strings.ToLower(strings.TrimSpace(part)) {
-		case "men":
-			return GenderMen
-		case "women":
-			return GenderWomen
-		case "boys":
-			return GenderBoys
-		case "girls":
-			return GenderGirls
+		if gender := ProductGenderLabel(part); gender != GenderNone {
+			return gender
 		}
 	}
-	return GenderNone
+	return titleGender(title)
+}
+
+func ProductGenderLabel(label string) float64 {
+	switch strings.ToLower(strings.TrimSpace(label)) {
+	case "men":
+		return GenderMen
+	case "women":
+		return GenderWomen
+	case "boys":
+		return GenderBoys
+	case "girls":
+		return GenderGirls
+	case "unisex":
+		return GenderUnisex
+	default:
+		return GenderNone
+	}
 }
 
 func GenderIntentMatch(queryGender, productGender float64) float64 {
 	if queryGender != GenderNone && queryGender == productGender {
 		return 1
 	}
+	if (queryGender == GenderMen || queryGender == GenderWomen) && productGender == GenderUnisex {
+		return 0.5
+	}
 	return 0
 }
 
 func GenderIntentMismatch(queryGender, productGender float64) float64 {
+	if productGender == GenderUnisex {
+		return 0
+	}
 	if queryGender != GenderNone && productGender != GenderNone && queryGender != productGender {
 		return 1
 	}
@@ -235,6 +252,8 @@ func brandStopToken(token string) bool {
 		"boy", "boys", "clothing", "fashion", "girl", "girls", "jewelry",
 		"men", "mens", "running", "shoe", "shoes", "sneaker", "sneakers",
 		"sports", "team", "watch", "watches", "woman", "women", "womens":
+		return true
+	case "unisex":
 		return true
 	default:
 		return false
@@ -356,7 +375,30 @@ func queryGenderToken(t string) float64 {
 		return GenderBoys
 	case "girls", "girl":
 		return GenderGirls
+	case "unisex":
+		return GenderUnisex
 	default:
 		return GenderNone
 	}
+}
+
+func titleGender(title string) float64 {
+	found := GenderNone
+	for _, t := range Tokenize(title) {
+		g := queryGenderToken(t)
+		if g == GenderNone {
+			continue
+		}
+		if g == GenderUnisex {
+			return GenderUnisex
+		}
+		if found != GenderNone && found != g {
+			if (found == GenderMen && g == GenderWomen) || (found == GenderWomen && g == GenderMen) {
+				return GenderUnisex
+			}
+			return GenderNone
+		}
+		found = g
+	}
+	return found
 }

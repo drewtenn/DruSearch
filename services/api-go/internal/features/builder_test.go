@@ -69,6 +69,35 @@ func TestBuildMatrixEncodesMissingRanksAsWorseThanSeenRanks(t *testing.T) {
 	}
 }
 
+func TestBuildMatrixUsesDerivedGenderWithUnisexPartialMatch(t *testing.T) {
+	hits := []retrieval.Hit{
+		{ProductID: "unisex", Title: "Nike Unisex Running Shoes", DerivedGender: "unisex"},
+		{ProductID: "women", Title: "Nike Women's Running Shoes", DerivedGender: "women"},
+	}
+
+	matrix := BuildMatrix("nike mens shoes", hits, nil, nil)
+
+	if got := matrix[0+IdxProductGender]; got != GenderUnisex {
+		t.Fatalf("unisex product gender = %v, want %v", got, GenderUnisex)
+	}
+	if got := matrix[0+IdxGenderIntentMatch]; got != 0.5 {
+		t.Fatalf("unisex gender intent match = %v, want 0.5", got)
+	}
+	if got := matrix[0+IdxGenderIntentMis]; got != 0 {
+		t.Fatalf("unisex gender intent mismatch = %v, want 0", got)
+	}
+
+	if got := matrix[NumFeatures+IdxProductGender]; got != GenderWomen {
+		t.Fatalf("women product gender = %v, want %v", got, GenderWomen)
+	}
+	if got := matrix[NumFeatures+IdxGenderIntentMatch]; got != 0 {
+		t.Fatalf("women gender intent match = %v, want 0", got)
+	}
+	if got := matrix[NumFeatures+IdxGenderIntentMis]; got != 1 {
+		t.Fatalf("women gender intent mismatch = %v, want 1", got)
+	}
+}
+
 func TestQueryTokenCoverageKeepsBrandTokensWhenQueryIsOnlyBrand(t *testing.T) {
 	brands := map[string]struct{}{"jordan": {}}
 

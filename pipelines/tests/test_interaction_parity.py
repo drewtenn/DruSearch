@@ -107,9 +107,10 @@ def test_interaction_parity_fixtures():
         if got_qgi != exp["query_gender_intent"]:
             failures.append(f"{case['name']}: query_gender_intent({q!r}) = {got_qgi}, want {exp['query_gender_intent']}")
 
-        got_pg = product_gender(category_path)
+        product_title = case.get("product_title", "")
+        got_pg = product_gender(category_path, product_title)
         if got_pg != exp["product_gender"]:
-            failures.append(f"{case['name']}: product_gender({category_path!r}) = {got_pg}, want {exp['product_gender']}")
+            failures.append(f"{case['name']}: product_gender({category_path!r}, {product_title!r}) = {got_pg}, want {exp['product_gender']}")
 
         got_gim = gender_intent_match(got_qgi, got_pg)
         if got_gim != exp["gender_intent_match"]:
@@ -133,7 +134,6 @@ def test_interaction_parity_fixtures():
         if got_pcm != exp["product_color_match"]:
             failures.append(f"{case['name']}: product_color_match({q!r}, {product_color!r}) = {got_pcm}, want {exp['product_color_match']}")
 
-        product_title = case.get("product_title", "")
         got_tqtc = query_token_coverage(q, product_title, brands)
         if got_tqtc != exp["title_query_token_coverage"]:
             failures.append(f"{case['name']}: title_query_token_coverage({q!r}, {product_title!r}) = {got_tqtc}, want {exp['title_query_token_coverage']}")
@@ -174,7 +174,7 @@ def test_schema_matches_generated():
         f"FEATURE_NAMES drift: {FEATURE_NAMES} vs {gen.FEATURE_NAMES}"
     )
     assert NUM_FEATURES == gen.NUM_FEATURES
-    assert gen.SCHEMA_VERSION == "v6"
+    assert gen.SCHEMA_VERSION == "v7"
 
 
 def test_query_token_coverage_keeps_brand_tokens_when_query_is_only_brand():

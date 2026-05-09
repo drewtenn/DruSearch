@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-SCHEMA_VERSION = "v6"
+SCHEMA_VERSION = "v7"
 
 @dataclass(frozen=True)
 class GeneratedFeature:
@@ -29,9 +29,9 @@ FEATURES: tuple[GeneratedFeature, ...] = (
     GeneratedFeature(index=10, name="query_has_color", kind="BOOL", source="INTERACTION", description="Query contains a known color token"),
     GeneratedFeature(index=11, name="query_has_category_token", kind="BOOL", source="INTERACTION", description="Query contains a known category token"),
     GeneratedFeature(index=12, name="query_has_size_pattern", kind="BOOL", source="INTERACTION", description="Query contains size/unit pattern"),
-    GeneratedFeature(index=13, name="query_gender_intent", kind="INT", source="INTERACTION", description="Requested gender: 0=none, 1=men, 2=women, 3=boys, 4=girls"),
-    GeneratedFeature(index=14, name="product_gender", kind="INT", source="STATIC_PRODUCT", description="Product gender from category path"),
-    GeneratedFeature(index=15, name="gender_intent_match", kind="BOOL", source="INTERACTION", description="Query gender matches product gender"),
+    GeneratedFeature(index=13, name="query_gender_intent", kind="INT", source="INTERACTION", description="Requested gender: 0=none, 1=men, 2=women, 3=boys, 4=girls, 5=unisex"),
+    GeneratedFeature(index=14, name="product_gender", kind="INT", source="STATIC_PRODUCT", description="Derived product gender from indexed gender, category path, or title"),
+    GeneratedFeature(index=15, name="gender_intent_match", kind="FLOAT", source="INTERACTION", description="Query gender match strength; unisex products partially match men and women"),
     GeneratedFeature(index=16, name="gender_intent_mismatch", kind="BOOL", source="INTERACTION", description="Known query gender differs from product gender"),
     GeneratedFeature(index=17, name="product_brand_match", kind="BOOL", source="INTERACTION", description="Query brand token matches product brand"),
     GeneratedFeature(index=18, name="product_brand_token_overlap", kind="FLOAT", source="INTERACTION", description="Fraction of product brand tokens present in query"),

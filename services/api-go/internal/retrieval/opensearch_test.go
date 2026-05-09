@@ -2,12 +2,12 @@ package retrieval
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 )
 
 func TestBuildBM25BodyLeavesQueriesUnfiltered(t *testing.T) {
 	for _, queryText := range []string{
-		"mens nike running shoes",
 		"nike running shoes",
 	} {
 		t.Run(queryText, func(t *testing.T) {
@@ -29,6 +29,38 @@ func TestBuildBM25BodyLeavesQueriesUnfiltered(t *testing.T) {
 				t.Fatalf("query=%#v, want no hard filter", query)
 			}
 		})
+	}
+}
+
+func TestBuildBM25BodyBoostsDerivedGenderIntent(t *testing.T) {
+	body, err := buildBM25Body("nike mens shoes", 50)
+	if err != nil {
+		t.Fatalf("buildBM25Body: %v", err)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+
+	query := got["query"].(map[string]any)
+	boosting := query["boosting"].(map[string]any)
+	positive := boosting["positive"].(map[string]any)
+	boolQuery := positive["bool"].(map[string]any)
+	should := boolQuery["should"].([]any)
+
+	if len(should) != 2 {
+		t.Fatalf("should=%#v, want men and unisex derived gender boosts", should)
+	}
+	if boosting["negative_boost"] != 0.25 {
+		t.Fatalf("negative_boost=%#v, want 0.25", boosting["negative_boost"])
+	}
+
+	negative := boosting["negative"].(map[string]any)
+	terms := negative["terms"].(map[string]any)
+	wantOpposite := []any{"women", "boys", "girls"}
+	if gotOpposite := terms["derived_gender"]; !reflect.DeepEqual(gotOpposite, wantOpposite) {
+		t.Fatalf("negative derived_gender=%#v, want %#v", gotOpposite, wantOpposite)
 	}
 }
 

@@ -10,10 +10,8 @@ import os
 from pathlib import Path
 from typing import Iterable
 
-from opensearchpy.helpers import bulk
-
-from pipelines.common import db, opensearch_client
 from pipelines.common.logging import configure
+from pipelines.features import transforms as tf
 
 log = configure("index.bm25")
 
@@ -39,7 +37,24 @@ def _ensure_index(client) -> None:
     log.info("created index %s", INDEX_NAME)
 
 
+def _derived_gender_label(category_path: list[str] | tuple[str, ...] | None, title: str | None) -> str:
+    gender = tf.product_gender(category_path, title)
+    if gender == tf.GENDER_MEN:
+        return "men"
+    if gender == tf.GENDER_WOMEN:
+        return "women"
+    if gender == tf.GENDER_BOYS:
+        return "boys"
+    if gender == tf.GENDER_GIRLS:
+        return "girls"
+    if gender == tf.GENDER_UNISEX:
+        return "unisex"
+    return "unknown"
+
+
 def _iter_docs() -> Iterable[dict]:
+    from pipelines.common import db
+
     with db.conn() as c, c.cursor(name="products_cursor") as cur:
         cur.execute(
             "SELECT product_id, title, COALESCE(description, ''), COALESCE(bullet_points, ''),"
@@ -49,6 +64,7 @@ def _iter_docs() -> Iterable[dict]:
         )
         for row in cur:
             pid, title, desc, bullets, brand, color, cat, cat_path, price, pop = row
+            category_path = cat_path or []
             yield {
                 "_index": INDEX_NAME,
                 "_id": pid,
@@ -60,7 +76,8 @@ def _iter_docs() -> Iterable[dict]:
                     "brand":            brand or None,
                     "color":            color or None,
                     "category":         cat or None,
-                    "category_path":    cat_path or [],
+                    "category_path":    category_path,
+                    "derived_gender":   _derived_gender_label(category_path, title),
                     "price_cents":      int(price),
                     "popularity_prior": float(pop),
                     "ctr_prior":        0.0,
@@ -69,6 +86,10 @@ def _iter_docs() -> Iterable[dict]:
 
 
 def main() -> int:
+    from opensearchpy.helpers import bulk
+
+    from pipelines.common import opensearch_client
+
     client = opensearch_client.client()
     _ensure_index_template(client)
     _ensure_index(client)

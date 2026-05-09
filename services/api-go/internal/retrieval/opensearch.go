@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
+	"unicode"
 
 	opensearch "github.com/opensearch-project/opensearch-go/v4"
 )
@@ -28,6 +30,7 @@ type Hit struct {
 	Color           string   `json:"color"`
 	Category        string   `json:"category"`
 	CategoryPath    []string `json:"category_path"`
+	DerivedGender   string   `json:"derived_gender"`
 	PriceCents      int      `json:"price_cents"`
 	PopularityPrior float64  `json:"popularity_prior"`
 	BM25            float64  `json:"bm25"`
@@ -44,6 +47,7 @@ type osSource struct {
 	Color           string   `json:"color"`
 	Category        string   `json:"category"`
 	CategoryPath    []string `json:"category_path"`
+	DerivedGender   string   `json:"derived_gender"`
 	PriceCents      int      `json:"price_cents"`
 	PopularityPrior float64  `json:"popularity_prior"`
 }
@@ -96,7 +100,7 @@ func (e *Engine) doSearch(ctx context.Context, body []byte) ([]rawHit, error) {
 }
 
 func sourceFields() []string {
-	return []string{"product_id", "title", "brand", "color", "category", "category_path", "price_cents", "popularity_prior"}
+	return []string{"product_id", "title", "brand", "color", "category", "category_path", "derived_gender", "price_cents", "popularity_prior"}
 }
 
 func buildBM25Body(query string, k int) ([]byte, error) {
@@ -105,6 +109,9 @@ func buildBM25Body(query string, k int) ([]byte, error) {
 			"query":  query,
 			"fields": []string{"title^2", "category_path^2", "category^1.5", "bullets", "description"},
 		},
+	}
+	if intent := genderIntentLabel(query); intent != "" {
+		baseQuery = genderBoostingQuery(baseQuery, intent)
 	}
 	return json.Marshal(map[string]any{
 		"size":    k,
@@ -159,6 +166,7 @@ func (e *Engine) BM25(ctx context.Context, query string, k int) ([]Hit, error) {
 			Color:           r.Source.Color,
 			Category:        r.Source.Category,
 			CategoryPath:    r.Source.CategoryPath,
+			DerivedGender:   r.Source.DerivedGender,
 			PriceCents:      r.Source.PriceCents,
 			PopularityPrior: r.Source.PopularityPrior,
 			BM25:            r.Score,
@@ -238,6 +246,7 @@ func (e *Engine) Hybrid(ctx context.Context, query string, vec []float32, candN,
 			Color:           f.src.Color,
 			Category:        f.src.Category,
 			CategoryPath:    f.src.CategoryPath,
+			DerivedGender:   f.src.DerivedGender,
 			PriceCents:      f.src.PriceCents,
 			PopularityPrior: f.src.PopularityPrior,
 			BM25:            f.bm25,
@@ -250,6 +259,113 @@ func (e *Engine) Hybrid(ctx context.Context, query string, vec []float32, candN,
 	// Sort by RRF desc.
 	sortHitsByRRF(hits)
 	return hits, nil
+}
+
+func genderBoostingQuery(baseQuery map[string]any, intent string) map[string]any {
+	should := []any{
+		termBoost("derived_gender", intent, 8.0),
+	}
+	if intent == "men" || intent == "women" {
+		should = append(should, termBoost("derived_gender", "unisex", 4.0))
+	}
+	return map[string]any{
+		"boosting": map[string]any{
+			"positive": map[string]any{
+				"bool": map[string]any{
+					"must":   []any{baseQuery},
+					"should": should,
+				},
+			},
+			"negative": map[string]any{
+				"terms": map[string]any{
+					"derived_gender": oppositeGenderLabels(intent),
+				},
+			},
+			"negative_boost": 0.25,
+		},
+	}
+}
+
+func termBoost(field, value string, boost float64) map[string]any {
+	return map[string]any{
+		"term": map[string]any{
+			field: map[string]any{
+				"value": value,
+				"boost": boost,
+			},
+		},
+	}
+}
+
+func oppositeGenderLabels(intent string) []string {
+	switch intent {
+	case "men":
+		return []string{"women", "boys", "girls"}
+	case "women":
+		return []string{"men", "boys", "girls"}
+	case "boys":
+		return []string{"men", "women", "girls", "unisex"}
+	case "girls":
+		return []string{"men", "women", "boys", "unisex"}
+	case "unisex":
+		return []string{"men", "women", "boys", "girls"}
+	default:
+		return nil
+	}
+}
+
+func genderIntentLabel(query string) string {
+	found := ""
+	for _, token := range tokenize(query) {
+		label := genderTokenLabel(token)
+		if label == "" {
+			continue
+		}
+		if found != "" && found != label {
+			return ""
+		}
+		found = label
+	}
+	return found
+}
+
+func genderTokenLabel(token string) string {
+	switch token {
+	case "men", "mens", "man", "male":
+		return "men"
+	case "women", "womens", "woman", "female":
+		return "women"
+	case "boys", "boy":
+		return "boys"
+	case "girls", "girl":
+		return "girls"
+	case "unisex":
+		return "unisex"
+	default:
+		return ""
+	}
+}
+
+func tokenize(s string) []string {
+	if s == "" {
+		return nil
+	}
+	out := make([]string, 0, 8)
+	var sb strings.Builder
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' {
+			sb.WriteRune(unicode.ToLower(r))
+			continue
+		}
+		if sb.Len() > 0 {
+			out = append(out, sb.String())
+			sb.Reset()
+		}
+	}
+	if sb.Len() > 0 {
+		out = append(out, sb.String())
+	}
+	return out
 }
 
 func sortHitsByRRF(h []Hit) {

@@ -96,7 +96,10 @@ func BuildMatrix(query string, hits []retrieval.Hit, vocab *Vocab, user *UserFea
 		out[off+IdxQueryHasColor] = qColor
 		out[off+IdxQueryHasCategoryToken] = qCategory
 		out[off+IdxQueryHasSizePat] = qSize
-		pGender := ProductGender(h.CategoryPath)
+		pGender := ProductGenderLabel(h.DerivedGender)
+		if pGender == GenderNone {
+			pGender = ProductGender(h.CategoryPath, h.Title)
+		}
 		out[off+IdxQueryGenderIntent] = qGender
 		out[off+IdxProductGender] = pGender
 		out[off+IdxGenderIntentMatch] = GenderIntentMatch(qGender, pGender)

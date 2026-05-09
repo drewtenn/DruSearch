@@ -23,6 +23,7 @@ GENDER_MEN = 1.0
 GENDER_WOMEN = 2.0
 GENDER_BOYS = 3.0
 GENDER_GIRLS = 4.0
+GENDER_UNISEX = 5.0
 
 _QUERY_GENDER_TOKENS = {
     "men": GENDER_MEN,
@@ -37,6 +38,7 @@ _QUERY_GENDER_TOKENS = {
     "boy": GENDER_BOYS,
     "girls": GENDER_GIRLS,
     "girl": GENDER_GIRLS,
+    "unisex": GENDER_UNISEX,
 }
 
 _CATEGORY_GENDER_VALUES = {
@@ -44,6 +46,7 @@ _CATEGORY_GENDER_VALUES = {
     "women": GENDER_WOMEN,
     "boys": GENDER_BOYS,
     "girls": GENDER_GIRLS,
+    "unisex": GENDER_UNISEX,
 }
 
 _BRAND_STOP_TOKENS = {
@@ -68,6 +71,7 @@ _BRAND_STOP_TOKENS = {
     "sneakers",
     "sports",
     "team",
+    "unisex",
     "watch",
     "watches",
     "woman",
@@ -156,21 +160,31 @@ def query_gender_intent(query: str | None) -> float:
     return found.pop() if len(found) == 1 else GENDER_NONE
 
 
-def product_gender(category_path: list[str] | tuple[str, ...] | None) -> float:
+def product_gender_label(label: str | None) -> float:
+    return _CATEGORY_GENDER_VALUES.get(str(label or "").strip().lower(), GENDER_NONE)
+
+
+def product_gender(category_path: list[str] | tuple[str, ...] | None, title: str | None = None) -> float:
     if not category_path:
-        return GENDER_NONE
+        return _title_gender(title)
     for part in category_path:
-        gender = _CATEGORY_GENDER_VALUES.get(str(part).strip().lower())
+        gender = product_gender_label(part)
         if gender:
             return gender
-    return GENDER_NONE
+    return _title_gender(title)
 
 
 def gender_intent_match(query_gender: float, product_gender_value: float) -> float:
-    return 1.0 if query_gender and query_gender == product_gender_value else 0.0
+    if query_gender and query_gender == product_gender_value:
+        return 1.0
+    if query_gender in {GENDER_MEN, GENDER_WOMEN} and product_gender_value == GENDER_UNISEX:
+        return 0.5
+    return 0.0
 
 
 def gender_intent_mismatch(query_gender: float, product_gender_value: float) -> float:
+    if product_gender_value == GENDER_UNISEX:
+        return 0.0
     return 1.0 if query_gender and product_gender_value and query_gender != product_gender_value else 0.0
 
 
@@ -257,3 +271,19 @@ def token_overlap_fraction(query: str | None, text: str | None) -> float:
 
 def product_category_token_overlap(query: str | None, category_text: str | None) -> float:
     return token_overlap_fraction(query, category_text)
+
+
+def _title_gender(title: str | None) -> float:
+    found = GENDER_NONE
+    for token in tokenize(title):
+        gender = _QUERY_GENDER_TOKENS.get(token, GENDER_NONE)
+        if not gender:
+            continue
+        if gender == GENDER_UNISEX:
+            return GENDER_UNISEX
+        if found and found != gender:
+            if {found, gender} == {GENDER_MEN, GENDER_WOMEN}:
+                return GENDER_UNISEX
+            return GENDER_NONE
+        found = gender
+    return found

@@ -127,6 +127,61 @@ def _load_judgments(query_ids: list[int]) -> dict[int, dict[str, str]]:
 # Retrieval (talks directly to OpenSearch + the embedder, mirroring the Go path)
 # ---------------------------------------------------------------------------
 
+def _bm25_query(query: str) -> dict:
+    base = {
+        "multi_match": {
+            "query": query,
+            "fields": ["title^2", "category_path^2", "category^1.5", "bullets", "description"],
+        }
+    }
+    intent = _gender_intent_label(query)
+    if not intent:
+        return base
+    should = [_term_boost("derived_gender", intent, 8.0)]
+    if intent in {"men", "women"}:
+        should.append(_term_boost("derived_gender", "unisex", 4.0))
+    return {
+        "boosting": {
+            "positive": {"bool": {"must": [base], "should": should}},
+            "negative": {"terms": {"derived_gender": _opposite_gender_labels(intent)}},
+            "negative_boost": 0.25,
+        }
+    }
+
+
+def _term_boost(field: str, value: str, boost: float) -> dict:
+    return {"term": {field: {"value": value, "boost": boost}}}
+
+
+def _gender_intent_label(query: str) -> str:
+    gender = tf.query_gender_intent(query)
+    if gender == tf.GENDER_MEN:
+        return "men"
+    if gender == tf.GENDER_WOMEN:
+        return "women"
+    if gender == tf.GENDER_BOYS:
+        return "boys"
+    if gender == tf.GENDER_GIRLS:
+        return "girls"
+    if gender == tf.GENDER_UNISEX:
+        return "unisex"
+    return ""
+
+
+def _opposite_gender_labels(intent: str) -> list[str]:
+    if intent == "men":
+        return ["women", "boys", "girls"]
+    if intent == "women":
+        return ["men", "boys", "girls"]
+    if intent == "boys":
+        return ["men", "women", "girls", "unisex"]
+    if intent == "girls":
+        return ["men", "women", "boys", "unisex"]
+    if intent == "unisex":
+        return ["men", "women", "boys", "girls"]
+    return []
+
+
 class HybridRetriever:
     def __init__(self) -> None:
         from pipelines.common import opensearch_client
@@ -149,7 +204,7 @@ class HybridRetriever:
         body_bm25 = {
             "size": n,
             "_source": False,
-            "query": {"multi_match": {"query": query, "fields": ["title^2", "bullets", "description"]}},
+            "query": _bm25_query(query),
         }
         bm25_resp = self.os.search(index=self.index, body=body_bm25)
         bm25_hits = bm25_resp["hits"]["hits"]
