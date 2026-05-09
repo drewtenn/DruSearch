@@ -10,7 +10,6 @@ type rankerMode string
 const (
 	rankerHybrid rankerMode = "hybrid"
 	rankerLTR    rankerMode = "ltr"
-	rankerBGE    rankerMode = "bge"
 )
 
 func rankerFromRequest(requested, def string) (rankerMode, error) {
@@ -26,8 +25,6 @@ func rankerFromRequest(requested, def string) (rankerMode, error) {
 		return rankerHybrid, nil
 	case "ltr":
 		return rankerLTR, nil
-	case "bge":
-		return rankerBGE, nil
 	default:
 		return "", fmt.Errorf("unknown ranker %q", requested)
 	}

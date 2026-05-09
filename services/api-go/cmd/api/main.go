@@ -17,7 +17,6 @@ import (
 	"github.com/drewtenn/drusearch/services/api-go/internal/eventbus"
 	"github.com/drewtenn/drusearch/services/api-go/internal/features"
 	"github.com/drewtenn/drusearch/services/api-go/internal/httpapi"
-	"github.com/drewtenn/drusearch/services/api-go/internal/neuralrerank"
 	"github.com/drewtenn/drusearch/services/api-go/internal/products"
 	"github.com/drewtenn/drusearch/services/api-go/internal/rerank"
 	"github.com/drewtenn/drusearch/services/api-go/internal/retrieval"
@@ -48,7 +47,6 @@ func main() {
 
 	embClient := embedder.New(cfg.EmbedderURL, cfg.EmbedderTimeout)
 	emb := embedder.NewBreaker(embClient)
-	neural := neuralrerank.New(cfg.EmbedderURL, 10*time.Second)
 	ret := retrieval.New(stores.OS, cfg.OpenSearchIndex)
 	prods := products.New(stores.PG)
 	bus := eventbus.New(stores.PG, logger, eventbus.Options{})
@@ -87,19 +85,17 @@ func main() {
 		logger.Warn("ADMIN_TOKEN not set; /admin/* will reject all requests")
 	}
 	srv := &httpapi.Server{
-		Logger:                 logger,
-		Stores:                 stores,
-		Embedder:               emb,
-		Retrieval:              ret,
-		Products:               prods,
-		Bus:                    bus,
-		Reranker:               rr,
-		Neural:                 neural,
-		Vocab:                  vocab,
-		AdminToken:             cfg.AdminToken,
-		DefaultRanker:          cfg.DefaultRanker,
-		NeuralRerankCandidates: cfg.NeuralRerankCandidates,
-		RequestTimeout:         cfg.APITimeout,
+		Logger:         logger,
+		Stores:         stores,
+		Embedder:       emb,
+		Retrieval:      ret,
+		Products:       prods,
+		Bus:            bus,
+		Reranker:       rr,
+		Vocab:          vocab,
+		AdminToken:     cfg.AdminToken,
+		DefaultRanker:  cfg.DefaultRanker,
+		RequestTimeout: cfg.APITimeout,
 	}
 	httpServer := &http.Server{
 		Addr:              fmt.Sprintf("%s:%d", cfg.APIHost, cfg.APIPort),

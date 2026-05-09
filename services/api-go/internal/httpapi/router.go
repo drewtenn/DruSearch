@@ -12,7 +12,6 @@ import (
 	"github.com/drewtenn/drusearch/services/api-go/internal/embedder"
 	"github.com/drewtenn/drusearch/services/api-go/internal/eventbus"
 	"github.com/drewtenn/drusearch/services/api-go/internal/features"
-	"github.com/drewtenn/drusearch/services/api-go/internal/neuralrerank"
 	"github.com/drewtenn/drusearch/services/api-go/internal/products"
 	"github.com/drewtenn/drusearch/services/api-go/internal/rerank"
 	"github.com/drewtenn/drusearch/services/api-go/internal/retrieval"
@@ -27,13 +26,11 @@ type Server struct {
 	Products   *products.Store
 	Bus        *eventbus.Bus
 	Reranker   *rerank.Reranker
-	Neural     *neuralrerank.Client
 	Vocab      *features.Vocab
 	AdminToken string
 
-	DefaultRanker          string
-	NeuralRerankCandidates int
-	RequestTimeout         time.Duration
+	DefaultRanker  string
+	RequestTimeout time.Duration
 }
 
 func (s *Server) Routes() http.Handler {

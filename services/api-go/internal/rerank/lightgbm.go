@@ -117,8 +117,6 @@ type ScoredHit struct {
 	retrieval.Hit
 	LTR     float64
 	LTRRank int
-	BGE     float64
-	BGERank int
 }
 
 func Apply(l *Loaded, query string, hits []retrieval.Hit, vocab *features.Vocab, user *features.UserFeatures) ([]ScoredHit, error) {

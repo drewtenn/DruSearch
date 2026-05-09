@@ -22,8 +22,7 @@ type Config struct {
 	EmbedderURL     string
 	EmbedderTimeout time.Duration
 
-	DefaultRanker          string
-	NeuralRerankCandidates int
+	DefaultRanker string
 
 	AdminToken string
 
@@ -43,12 +42,9 @@ func FromEnv() (Config, error) {
 		EmbedderURL:     fmt.Sprintf("http://%s:%s", getenv("EMBEDDER_HOST", "embedder"), getenv("EMBEDDER_PORT", "8000")),
 		EmbedderTimeout: 2 * time.Second,
 		DefaultRanker:   getenv("DEFAULT_RANKER", "hybrid"),
-		NeuralRerankCandidates: mustAtoi(getenv(
-			"NEURAL_RERANK_CANDIDATES", "50",
-		)),
-		AdminToken:   os.Getenv("ADMIN_TOKEN"),
-		LTRModelDir:  getenv("LTR_MODEL_DIR", "/var/lib/drusearch/models"),
-		LTRModelName: getenv("LTR_MODEL_NAME", "ltr_reranker"),
+		AdminToken:      os.Getenv("ADMIN_TOKEN"),
+		LTRModelDir:     getenv("LTR_MODEL_DIR", "/var/lib/drusearch/models"),
+		LTRModelName:    getenv("LTR_MODEL_NAME", "ltr_reranker"),
 	}
 	return c, nil
 }

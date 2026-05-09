@@ -70,6 +70,7 @@ bootstrap-search: ## Cold-start search: data, vectors, clicks, features, model, 
 	$(MAKE) refresh-product-features
 	$(MAKE) refresh-user-features
 	$(MAKE) build-training-rows
+	$(MAKE) label-bge-teacher
 	$(MAKE) train-ltr
 	$(MAKE) promote-model
 	$(MAKE) verify-promoted-model
@@ -103,12 +104,14 @@ simulate: ## Generate fake searches, clicks, and purchases for training data
 	$(COMPOSE) run --rm pipelines python -m pipelines.simulate.click_simulator
 
 ##@ Phase 4 — teach and check a ranking model
-.PHONY: build-training-rows train-ltr retrain-model retrain-model-with-sim eval
+.PHONY: build-training-rows label-bge-teacher train-ltr retrain-model retrain-model-with-sim eval
 build-training-rows: ## Convert logged behavior into examples the model can learn from
 	$(COMPOSE) run --rm pipelines python -m pipelines.label.build_training_rows
+label-bge-teacher: ## Score training rows with offline BGE and distill weak labels
+	$(COMPOSE) --profile jobs run --rm pipelines python -m pipelines.label.bge_teacher
 train-ltr: ## Train a model to reorder search results toward better matches
 	$(COMPOSE) run --rm pipelines python -m pipelines.train.lgbm_ranker
-retrain-model: refresh-product-features refresh-user-features build-training-rows train-ltr promote-model verify-promoted-model reload-model ## Retrain and reload LTR from existing events
+retrain-model: refresh-product-features refresh-user-features build-training-rows label-bge-teacher train-ltr promote-model verify-promoted-model reload-model ## Retrain and reload LTR from existing events
 retrain-model-with-sim: simulate retrain-model ## Generate fresh simulated events, then retrain and reload LTR
 eval: ## Measure ranking quality without changing the live API
 	$(COMPOSE) run --rm pipelines python -m pipelines.evaluate.offline_eval

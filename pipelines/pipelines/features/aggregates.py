@@ -19,13 +19,14 @@ LOOKBACK_DAYS = int(os.getenv("AGG_LOOKBACK_DAYS", "30"))
 SQL = """
 WITH agg AS (
   SELECT
-    product_id,
-    SUM(CASE WHEN event_type = 'impression' THEN 1 ELSE 0 END) AS impressions,
-    SUM(CASE WHEN event_type = 'click'      THEN 1 ELSE 0 END) AS clicks,
-    SUM(CASE WHEN event_type = 'purchase'   THEN 1 ELSE 0 END) AS purchases
-  FROM search_events
-  WHERE ts > now() - (%s || ' days')::interval
-  GROUP BY product_id
+    e.product_id,
+    SUM(CASE WHEN e.event_type = 'impression' THEN 1 ELSE 0 END) AS impressions,
+    SUM(CASE WHEN e.event_type = 'click'      THEN 1 ELSE 0 END) AS clicks,
+    SUM(CASE WHEN e.event_type = 'purchase'   THEN 1 ELSE 0 END) AS purchases
+  FROM search_events e
+  JOIN products USING (product_id)
+  WHERE e.ts > now() - (%s || ' days')::interval
+  GROUP BY e.product_id
 )
 INSERT INTO product_features (product_id, impressions_30d, clicks_30d, purchases_30d, ctr_prior, pos_corrected_ctr, updated_at)
 SELECT

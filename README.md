@@ -73,6 +73,7 @@ After that, `/search` should return `mode` values such as `hybrid+ltr` when the 
 | `make seed-databases` | Load product data into Postgres and OpenSearch. |
 | `make embed-vectors` | Add dense vectors for k-NN retrieval. |
 | `make simulate` | Generate example searches, clicks, and purchases. |
+| `make label-bge-teacher` | Distill offline BGE teacher scores into LTR training rows. |
 | `make retrain-model` | Rebuild features, train, promote, and reload the ranker. |
 | `make metrics` | Show DruSearch Prometheus metrics. |
 | `make test-go` | Run Go tests. |
@@ -100,10 +101,10 @@ Admin endpoints require `ADMIN_TOKEN` in `.env`.
 curl -G http://localhost:8080/search \
   --data-urlencode "q=nike shoes that are low cost" \
   --data-urlencode "k=10" \
-  --data-urlencode "ranker=bge"
+  --data-urlencode "ranker=ltr"
 ```
 
-Supported values are `hybrid`/`rrf` for BM25+kNN retrieval order, `ltr` for the local LightGBM model, and `bge` for BAAI/bge-reranker-v2-m3 reranking over retrieved candidates. Set `DEFAULT_RANKER=hybrid|ltr|bge` to choose the default mode.
+Supported values are `hybrid`/`rrf` for BM25+kNN retrieval order and `ltr` for the local LightGBM model. BGE cross-encoder scoring runs only offline through `make label-bge-teacher`, where it distills weak labels for LTR training. Set `DEFAULT_RANKER=hybrid|ltr` to choose the default mode.
 
 ## Project Layout
 

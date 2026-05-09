@@ -11,10 +11,11 @@ func TestRankerFromRequestDefaultsAndAliases(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "default hybrid", def: "", want: rankerHybrid},
-		{name: "default bge", def: "bge", want: rankerBGE},
-		{name: "query overrides default", query: "hybrid", def: "bge", want: rankerHybrid},
+		{name: "default bge rejected", def: "bge", wantErr: true},
+		{name: "query overrides invalid default", query: "hybrid", def: "bge", want: rankerHybrid},
 		{name: "rrf alias", query: "rrf", want: rankerHybrid},
 		{name: "ltr", query: "ltr", want: rankerLTR},
+		{name: "bge query rejected", query: "bge", wantErr: true},
 		{name: "invalid", query: "wat", wantErr: true},
 	}
 

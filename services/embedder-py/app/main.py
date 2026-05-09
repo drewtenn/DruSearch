@@ -10,7 +10,7 @@ from typing import List
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from app.model import embedding_dim, get_model, model_name, rerank_scores, reranker_name
+from app.model import embedding_dim, get_model, model_name
 
 logger = logging.getLogger("embedder")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -47,29 +47,9 @@ class BatchEmbedResponse(BaseModel):
     model: str
 
 
-class RerankDocument(BaseModel):
-    id: str = Field(..., min_length=1, max_length=256)
-    text: str = Field(..., min_length=1, max_length=4096)
-
-
-class RerankRequest(BaseModel):
-    query: str = Field(..., min_length=1, max_length=2048)
-    documents: List[RerankDocument] = Field(..., min_length=1, max_length=256)
-
-
-class RerankScore(BaseModel):
-    id: str
-    score: float
-
-
-class RerankResponse(BaseModel):
-    scores: List[RerankScore]
-    model: str
-
-
 @app.get("/healthz")
 def healthz() -> dict:
-    return {"status": "ok", "model": model_name(), "reranker_model": reranker_name()}
+    return {"status": "ok", "model": model_name()}
 
 
 @app.get("/readyz")
@@ -92,18 +72,3 @@ def embed_batch(req: BatchEmbedRequest) -> BatchEmbedResponse:
     vecs = get_model().encode(req.texts, normalize_embeddings=True, batch_size=64).tolist()
     return BatchEmbedResponse(vectors=vecs, dim=len(vecs[0]), model=model_name())
 
-
-@app.post("/rerank", response_model=RerankResponse)
-def rerank(req: RerankRequest) -> RerankResponse:
-    try:
-        scores = rerank_scores(req.query, [doc.text for doc in req.documents])
-    except Exception as exc:
-        logger.exception("rerank failed")
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-    return RerankResponse(
-        scores=[
-            RerankScore(id=doc.id, score=score)
-            for doc, score in zip(req.documents, scores)
-        ],
-        model=reranker_name(),
-    )

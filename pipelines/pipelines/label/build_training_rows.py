@@ -5,6 +5,9 @@ For every impression we emit one row:
   label    = ESCI gain mapped E=4, S=3, C=2, I=0; 0 if (query, product) is unjudged
   split    = train | val | test  (deterministic hash on query_id; 80/10/10)
 
+Run pipelines.label.bge_teacher after this job to add offline BGE teacher
+scores and weak pseudo labels for unjudged rows before LTR training.
+
 Why ESCI labels and not clicks: with the synthetic click model, P(click) is
 dominated by examination(rank), so a click-trained LTR fits position rather
 than relevance. We use ESCI as the supervised signal; click data's role
@@ -61,9 +64,10 @@ def _load_events() -> pd.DataFrame:
     with db.conn() as c, c.cursor() as cur:
         cur.execute(
             """
-            SELECT query_id, query, user_id, product_id, position, retrieval_scores, ts
-            FROM search_events
-            WHERE event_type = 'impression'
+            SELECT e.query_id, e.query, e.user_id, e.product_id, e.position, e.retrieval_scores, e.ts
+            FROM search_events e
+            JOIN products USING (product_id)
+            WHERE e.event_type = 'impression'
             """
         )
         rows = cur.fetchall()
