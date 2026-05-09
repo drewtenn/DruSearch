@@ -246,3 +246,31 @@ redis-cli: ## Open redis-cli
 	$(COMPOSE) exec redis redis-cli
 os-health: ## Check OpenSearch cluster health
 	@curl -s http://localhost:9200/_cluster/health | jq .
+
+##@ Docs — build the conceptual book
+.PHONY: book-pdf
+BOOK_MD ?= DruSearch.md
+BOOK_PDF ?= DruSearch.pdf
+book-pdf: ## Render $(BOOK_MD) to $(BOOK_PDF) with pandoc
+	@command -v pandoc >/dev/null 2>&1 || { \
+		echo "pandoc not found. Install it (e.g. 'brew install pandoc')."; exit 1; }
+	@if command -v xelatex >/dev/null 2>&1; then \
+		ENGINE=xelatex; \
+	elif command -v pdflatex >/dev/null 2>&1; then \
+		ENGINE=pdflatex; \
+	elif command -v tectonic >/dev/null 2>&1; then \
+		ENGINE=tectonic; \
+	else \
+		echo "No LaTeX engine found. Install one (e.g. 'brew install --cask basictex' then 'sudo tlmgr install xetex')."; exit 1; \
+	fi; \
+	echo "Rendering $(BOOK_MD) -> $(BOOK_PDF) using $$ENGINE"; \
+	pandoc "$(BOOK_MD)" \
+		--from gfm \
+		--pdf-engine="$$ENGINE" \
+		--toc --toc-depth=2 \
+		-V geometry:margin=1in \
+		-V documentclass=book \
+		-V linkcolor=blue \
+		-V monofont="Menlo" \
+		-o "$(BOOK_PDF)"
+	@echo "Wrote $(BOOK_PDF)"
