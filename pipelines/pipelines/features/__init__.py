@@ -33,7 +33,7 @@ class FeatureDef:
     description: str
 
 
-# Ordered feature list. v4 intentionally replaces the previous schema; rebuild
+# Ordered feature list. v5 intentionally replaces the previous schema; rebuild
 # the API, training rows, and model before serving these indices.
 FEATURES: tuple[FeatureDef, ...] = (
     FeatureDef("bm25_score", Source.RETRIEVAL, "BM25 raw score"),
@@ -63,6 +63,8 @@ FEATURES: tuple[FeatureDef, ...] = (
     FeatureDef("user_brand_affinity", Source.ONLINE_USER, "User brand click-share in [0,1]"),
     FeatureDef("query_affordability_intent", Source.INTERACTION, "Query asks for affordable, cheap, budget, value, or low-cost products"),
     FeatureDef("affordability_price_score", Source.INTERACTION, "Low-price score active only for affordability-intent queries; larger means cheaper"),
+    FeatureDef("brand_family_match", Source.INTERACTION, "Query brand/subbrand intent matches product brand family without broadening to unrelated family products"),
+    FeatureDef("subbrand_title_match", Source.INTERACTION, "Query brand/subbrand alias appears in product title"),
 )
 
 FEATURE_NAMES: tuple[str, ...] = tuple(f.name for f in FEATURES)

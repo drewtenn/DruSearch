@@ -55,6 +55,7 @@ class Catalog:
     products: pd.DataFrame
     brand_tokens: frozenset[str]
     color_tokens: frozenset[str]
+    category_tokens: frozenset[str]
 
 
 def _load_catalog() -> Catalog:
@@ -64,19 +65,26 @@ def _load_catalog() -> Catalog:
             SELECT product_id, title, COALESCE(brand,'') AS brand,
                    COALESCE(color,'') AS color,
                    COALESCE(price_cents, 0) AS price_cents,
-                   COALESCE(popularity_prior, 0) AS popularity_prior
+                   COALESCE(popularity_prior, 0) AS popularity_prior,
+                   COALESCE(category_path, ARRAY[]::TEXT[]) AS category_path
             FROM products
             """
         )
         prod_rows = cur.fetchall()
 
     products = pd.DataFrame(prod_rows, columns=[
-        "product_id", "title", "brand", "color", "price_cents", "popularity_prior",
+        "product_id", "title", "brand", "color", "price_cents", "popularity_prior", "category_path",
     ]).set_index("product_id")
 
-    brand_tokens = frozenset(t for b in products["brand"].dropna().unique() for t in tf.tokenize(b))
+    brand_tokens = frozenset(t for b in products["brand"].dropna().unique() for t in tf.brand_tokens(b))
     color_tokens = frozenset(t for c in products["color"].dropna().unique() for t in tf.tokenize(c))
-    return Catalog(products=products, brand_tokens=brand_tokens, color_tokens=color_tokens)
+    category_tokens = frozenset(
+        t
+        for cp in products["category_path"].dropna()
+        for part in (cp or [])
+        for t in tf.tokenize(part)
+    )
+    return Catalog(products=products, brand_tokens=brand_tokens, color_tokens=color_tokens, category_tokens=category_tokens)
 
 
 def _load_test_queries(n: int) -> list[tuple[int, str]]:
@@ -183,7 +191,10 @@ def build_feature_matrix(query: str, hits: list[dict], cat: Catalog) -> np.ndarr
     qlen   = float(len(tf.tokenize(query)))
     qbrand = tf.query_has_brand(query, cat.brand_tokens)
     qcolor = tf.query_has_color(query, cat.color_tokens)
+    qcategory = tf.query_has_category_token(query, cat.category_tokens)
     qsize  = tf.query_has_size_pattern(query)
+    qgender = tf.query_gender_intent(query)
+    qaffordability = tf.query_affordability_intent(query)
 
     feat_index = {name: i for i, name in enumerate(FEATURE_NAMES)}
     for row, h in enumerate(hits):
@@ -191,8 +202,13 @@ def build_feature_matrix(query: str, hits: list[dict], cat: Catalog) -> np.ndarr
 
         prod = cat.products.loc[pid] if pid in cat.products.index else None
         title = "" if prod is None else (prod["title"] or "")
+        brand = "" if prod is None else (prod["brand"] or "")
+        color = "" if prod is None else (prod["color"] or "")
+        category_path = [] if prod is None else (prod["category_path"] or [])
+        category_text = " ".join(category_path)
         price = 0.0 if prod is None else float(prod["price_cents"] or 0)
         pop   = 0.0 if prod is None else float(prod["popularity_prior"] or 0)
+        pgender = tf.product_gender(category_path)
 
         X[row, feat_index["bm25_score"]]             = h["bm25"]
         X[row, feat_index["bm25_rank"]]              = h["bm25_rank"]
@@ -205,7 +221,23 @@ def build_feature_matrix(query: str, hits: list[dict], cat: Catalog) -> np.ndarr
         X[row, feat_index["query_length_tokens"]]    = qlen
         X[row, feat_index["query_has_brand"]]        = qbrand
         X[row, feat_index["query_has_color"]]        = qcolor
+        X[row, feat_index["query_has_category_token"]] = qcategory
         X[row, feat_index["query_has_size_pattern"]] = qsize
+        X[row, feat_index["query_gender_intent"]] = qgender
+        X[row, feat_index["product_gender"]] = pgender
+        X[row, feat_index["gender_intent_match"]] = tf.gender_intent_match(qgender, pgender)
+        X[row, feat_index["gender_intent_mismatch"]] = tf.gender_intent_mismatch(qgender, pgender)
+        X[row, feat_index["product_brand_match"]] = tf.product_brand_match(query, brand)
+        X[row, feat_index["product_brand_token_overlap"]] = tf.product_brand_token_overlap(query, brand)
+        X[row, feat_index["product_color_match"]] = tf.product_color_match(query, color)
+        X[row, feat_index["title_query_token_coverage"]] = tf.query_token_coverage(query, title, cat.brand_tokens)
+        X[row, feat_index["category_query_token_coverage"]] = tf.query_token_coverage(query, category_text, cat.brand_tokens)
+        X[row, feat_index["product_category_token_overlap"]] = tf.product_category_token_overlap(query, category_text)
+        X[row, feat_index["title_exact_query_match"]] = tf.exact_query_phrase_match(query, title)
+        X[row, feat_index["query_affordability_intent"]] = qaffordability
+        X[row, feat_index["affordability_price_score"]] = tf.affordability_price_score(qaffordability, price)
+        X[row, feat_index["brand_family_match"]] = tf.brand_family_match(query, brand, title)
+        X[row, feat_index["subbrand_title_match"]] = tf.subbrand_title_match(query, title)
         # user_brand_affinity: ESCI eval has no user identity; leave at 0.
         # Phase 6 personalization is demoed via per-user /search calls,
         # not folded into the ESCI relevance benchmark.

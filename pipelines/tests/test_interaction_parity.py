@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 
 from pipelines.features.transforms import (
+    brand_family_match,
     exact_query_phrase_match,
     gender_intent_match,
     gender_intent_mismatch,
@@ -29,6 +30,7 @@ from pipelines.features.transforms import (
     query_gender_intent,
     query_has_size_pattern,
     query_length_tokens,
+    subbrand_title_match,
     tokenize,
 )
 
@@ -149,6 +151,17 @@ def test_interaction_parity_fixtures():
         if got_teqm != exp["title_exact_query_match"]:
             failures.append(f"{case['name']}: title_exact_query_match({q!r}, {product_title!r}) = {got_teqm}, want {exp['title_exact_query_match']}")
 
+        if "brand_family_match" in exp:
+            product_brand = case.get("product_brand", "")
+            got_bfm = brand_family_match(q, product_brand, product_title)
+            if got_bfm != exp["brand_family_match"]:
+                failures.append(f"{case['name']}: brand_family_match({q!r}, {product_brand!r}, {product_title!r}) = {got_bfm}, want {exp['brand_family_match']}")
+
+        if "subbrand_title_match" in exp:
+            got_stm = subbrand_title_match(q, product_title)
+            if got_stm != exp["subbrand_title_match"]:
+                failures.append(f"{case['name']}: subbrand_title_match({q!r}, {product_title!r}) = {got_stm}, want {exp['subbrand_title_match']}")
+
     assert not failures, "interaction-feature parity drift:\n  " + "\n  ".join(failures)
 
 
@@ -161,7 +174,7 @@ def test_schema_matches_generated():
         f"FEATURE_NAMES drift: {FEATURE_NAMES} vs {gen.FEATURE_NAMES}"
     )
     assert NUM_FEATURES == gen.NUM_FEATURES
-    assert gen.SCHEMA_VERSION == "v4"
+    assert gen.SCHEMA_VERSION == "v5"
 
 
 def test_query_token_coverage_keeps_brand_tokens_when_query_is_only_brand():
@@ -169,3 +182,18 @@ def test_query_token_coverage_keeps_brand_tokens_when_query_is_only_brand():
 
     assert query_token_coverage("jordan", "Air Jordan Future", brands) == 1.0
     assert query_token_coverage("jordan", "Anti Crease Shoe Guard", brands) == 0.0
+
+
+def test_generic_brand_tokens_do_not_count_as_brand_matches():
+    assert product_brand_match("mens jordan basketball", "Altra Running Mens") == 0.0
+    assert product_brand_token_overlap("mens jordan basketball", "Altra Running Mens") == 0.0
+    assert product_brand_match("mens jordan basketball", "Jordan") == 1.0
+
+
+def test_brand_family_match_requires_subbrand_evidence_for_parent_brand():
+    assert brand_family_match("mens jordan basketball", "Nike", "Nike Men's Air Jordan 1 Mid Shoes") == 1.0
+    assert brand_family_match("mens jordan basketball", "Nike", "Nike Mens PG 5 Basketball Shoe") == 0.0
+    assert brand_family_match("mens jordan basketball", "Jordan", "Air Jordan Future") == 1.0
+
+    assert subbrand_title_match("mens jordan basketball", "Nike Men's Air Jordan 1 Mid Shoes") == 1.0
+    assert subbrand_title_match("mens jordan basketball", "Nike Mens PG 5 Basketball Shoe") == 0.0

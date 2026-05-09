@@ -50,6 +50,7 @@ ANON_MASK_SEED = int(os.getenv("ANON_MASK_SEED", "1337"))
 ESCI_LABEL = {"I": 0, "C": 2, "S": 3, "E": 4}
 
 BRAND_MATCH_PSEUDO_LABEL = int(os.getenv("BRAND_MATCH_PSEUDO_LABEL", "3"))
+BRAND_FAMILY_MATCH_PSEUDO_LABEL = int(os.getenv("BRAND_FAMILY_MATCH_PSEUDO_LABEL", "3"))
 TITLE_BRAND_PSEUDO_LABEL = int(os.getenv("TITLE_BRAND_PSEUDO_LABEL", "2"))
 CATEGORY_FULL_MATCH_PSEUDO_LABEL = int(os.getenv("CATEGORY_FULL_MATCH_PSEUDO_LABEL", "3"))
 CATEGORY_PARTIAL_MATCH_PSEUDO_LABEL = int(os.getenv("CATEGORY_PARTIAL_MATCH_PSEUDO_LABEL", "2"))
@@ -156,15 +157,21 @@ def apply_lexical_relevance_labels(
 
     unjudged_brand_query = (_float_col("query_has_brand") > 0) & ~judged_mask
 
-    brand_match = unjudged_brand_query & (_float_col("product_brand_match") > 0)
+    brand_match = unjudged_brand_query & (
+        (_float_col("product_brand_match") > 0)
+        | (_float_col("brand_family_match") > 0)
+    )
     out.loc[brand_match, "label"] = out.loc[brand_match, "label"].clip(
-        lower=BRAND_MATCH_PSEUDO_LABEL
+        lower=max(BRAND_MATCH_PSEUDO_LABEL, BRAND_FAMILY_MATCH_PSEUDO_LABEL)
     )
 
     title_match = (
         unjudged_brand_query
         & ~brand_match
-        & (_float_col("title_exact_query_match") > 0)
+        & (
+            (_float_col("title_exact_query_match") > 0)
+            | (_float_col("subbrand_title_match") > 0)
+        )
     )
     out.loc[title_match, "label"] = out.loc[title_match, "label"].clip(
         lower=TITLE_BRAND_PSEUDO_LABEL
@@ -231,8 +238,10 @@ def main() -> int:
 
     # Brand / color tokens for interaction features
     brand_token_set = frozenset(
-        t for b in products["brand"].dropna().unique()
-        if isinstance(b, str) and b for t in tf.tokenize(b)
+        t
+        for b in products["brand"].dropna().unique()
+        if isinstance(b, str) and b
+        for t in tf.brand_tokens(b)
     )
     color_token_set = frozenset(
         t for c in products["color"].dropna().unique()
@@ -272,6 +281,13 @@ def main() -> int:
     ]
     df["product_brand_token_overlap"] = [
         tf.product_brand_token_overlap(q, b) for q, b in zip(df["query"], df["brand"])
+    ]
+    df["brand_family_match"] = [
+        tf.brand_family_match(q, b, t)
+        for q, b, t in zip(df["query"], df["brand"], df["title"])
+    ]
+    df["subbrand_title_match"] = [
+        tf.subbrand_title_match(q, t) for q, t in zip(df["query"], df["title"])
     ]
     df["product_color_match"] = [
         tf.product_color_match(q, c) for q, c in zip(df["query"], df["color"])

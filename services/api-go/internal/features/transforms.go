@@ -149,8 +149,8 @@ func GenderIntentMismatch(queryGender, productGender float64) float64 {
 }
 
 func ProductBrandMatch(query, brand string) float64 {
-	queryTokens := tokenSet(Tokenize(query))
-	brandTokens := tokenSet(Tokenize(brand))
+	queryTokens := tokenSet(BrandTokens(query))
+	brandTokens := tokenSet(BrandTokens(brand))
 	for t := range brandTokens {
 		if _, ok := queryTokens[t]; ok {
 			return 1
@@ -160,8 +160,8 @@ func ProductBrandMatch(query, brand string) float64 {
 }
 
 func ProductBrandTokenOverlap(query, brand string) float64 {
-	queryTokens := tokenSet(Tokenize(query))
-	brandTokens := tokenSet(Tokenize(brand))
+	queryTokens := tokenSet(BrandTokens(query))
+	brandTokens := tokenSet(BrandTokens(brand))
 	if len(brandTokens) == 0 {
 		return 0
 	}
@@ -174,8 +174,71 @@ func ProductBrandTokenOverlap(query, brand string) float64 {
 	return float64(matched) / float64(len(brandTokens))
 }
 
+func SubbrandTitleMatch(query, title string) float64 {
+	queryTokens := tokenSet(BrandTokens(query))
+	if len(queryTokens) == 0 {
+		return 0
+	}
+	titleTokens := Tokenize(title)
+	for subbrand := range queryTokens {
+		if !knownSubbrand(subbrand) {
+			continue
+		}
+		if titleContainsSubbrandAlias(titleTokens, subbrand) {
+			return 1
+		}
+	}
+	return 0
+}
+
+func BrandFamilyMatch(query, brand, title string) float64 {
+	queryTokens := tokenSet(BrandTokens(query))
+	brandTokens := tokenSet(BrandTokens(brand))
+	if len(queryTokens) == 0 || len(brandTokens) == 0 {
+		return 0
+	}
+	for t := range brandTokens {
+		if _, ok := queryTokens[t]; ok {
+			return 1
+		}
+	}
+	for subbrand := range queryTokens {
+		if !subbrandParentBrandMatch(subbrand, brandTokens) {
+			continue
+		}
+		if SubbrandTitleMatch(query, title) == 1 {
+			return 1
+		}
+	}
+	return 0
+}
+
 func ProductColorMatch(query, color string) float64 {
 	return ProductBrandMatch(query, color)
+}
+
+func BrandTokens(text string) []string {
+	tokens := Tokenize(text)
+	out := make([]string, 0, len(tokens))
+	for _, token := range tokens {
+		if brandStopToken(token) {
+			continue
+		}
+		out = append(out, token)
+	}
+	return out
+}
+
+func brandStopToken(token string) bool {
+	switch token {
+	case "accessories", "accessory", "active", "athletic", "basketball",
+		"boy", "boys", "clothing", "fashion", "girl", "girls", "jewelry",
+		"men", "mens", "running", "shoe", "shoes", "sneaker", "sneakers",
+		"sports", "team", "watch", "watches", "woman", "women", "womens":
+		return true
+	default:
+		return false
+	}
 }
 
 func QueryTokenCoverage(query, text string, ignored map[string]struct{}) float64 {
@@ -233,6 +296,54 @@ func tokenSet(tokens []string) map[string]struct{} {
 		out[t] = struct{}{}
 	}
 	return out
+}
+
+func knownSubbrand(subbrand string) bool {
+	switch subbrand {
+	case "jordan":
+		return true
+	default:
+		return false
+	}
+}
+
+func subbrandParentBrandMatch(subbrand string, brandTokens map[string]struct{}) bool {
+	switch subbrand {
+	case "jordan":
+		_, ok := brandTokens["nike"]
+		return ok
+	default:
+		return false
+	}
+}
+
+func titleContainsSubbrandAlias(titleTokens []string, subbrand string) bool {
+	switch subbrand {
+	case "jordan":
+		return containsTokenSequence(titleTokens, []string{"air", "jordan"}) ||
+			containsTokenSequence(titleTokens, []string{"jordan"})
+	default:
+		return false
+	}
+}
+
+func containsTokenSequence(tokens, sequence []string) bool {
+	if len(sequence) == 0 || len(sequence) > len(tokens) {
+		return false
+	}
+	for i := 0; i <= len(tokens)-len(sequence); i++ {
+		match := true
+		for j, want := range sequence {
+			if tokens[i+j] != want {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
 }
 
 func queryGenderToken(t string) float64 {

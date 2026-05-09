@@ -56,3 +56,33 @@ func TestQueryTokenCoverageKeepsBrandTokensWhenQueryIsOnlyBrand(t *testing.T) {
 		t.Fatalf("coverage for title mismatch = %v, want 0", got)
 	}
 }
+
+func TestGenericBrandTokensDoNotCountAsBrandMatches(t *testing.T) {
+	if got := ProductBrandMatch("mens jordan basketball", "Altra Running Mens"); got != 0 {
+		t.Fatalf("generic brand match = %v, want 0", got)
+	}
+	if got := ProductBrandTokenOverlap("mens jordan basketball", "Altra Running Mens"); got != 0 {
+		t.Fatalf("generic brand overlap = %v, want 0", got)
+	}
+	if got := ProductBrandMatch("mens jordan basketball", "Jordan"); got != 1 {
+		t.Fatalf("jordan brand match = %v, want 1", got)
+	}
+}
+
+func TestBrandFamilyMatchRequiresSubbrandEvidenceForParentBrand(t *testing.T) {
+	if got := BrandFamilyMatch("mens jordan basketball", "Nike", "Nike Men's Air Jordan 1 Mid Shoes"); got != 1 {
+		t.Fatalf("nike air jordan family match = %v, want 1", got)
+	}
+	if got := BrandFamilyMatch("mens jordan basketball", "Nike", "Nike Mens PG 5 Basketball Shoe"); got != 0 {
+		t.Fatalf("generic nike basketball family match = %v, want 0", got)
+	}
+	if got := BrandFamilyMatch("mens jordan basketball", "Jordan", "Air Jordan Future"); got != 1 {
+		t.Fatalf("jordan brand family match = %v, want 1", got)
+	}
+	if got := SubbrandTitleMatch("mens jordan basketball", "Nike Men's Air Jordan 1 Mid Shoes"); got != 1 {
+		t.Fatalf("air jordan title subbrand match = %v, want 1", got)
+	}
+	if got := SubbrandTitleMatch("mens jordan basketball", "Nike Mens PG 5 Basketball Shoe"); got != 0 {
+		t.Fatalf("generic nike title subbrand match = %v, want 0", got)
+	}
+}

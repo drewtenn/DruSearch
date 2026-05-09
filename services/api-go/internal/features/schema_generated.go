@@ -3,7 +3,7 @@
 
 package features
 
-const SchemaVersion = "v4"
+const SchemaVersion = "v5"
 
 const (
 	GenBm25Score = 0
@@ -33,8 +33,10 @@ const (
 	GenUserBrandAffinity = 24
 	GenQueryAffordabilityIntent = 25
 	GenAffordabilityPriceScore = 26
+	GenBrandFamilyMatch = 27
+	GenSubbrandTitleMatch = 28
 
-	GenNumFeatures = 27
+	GenNumFeatures = 29
 )
 
 // GenNames is the ordered feature-name list aligned with the indices above.
@@ -66,4 +68,6 @@ var GenNames = [...]string{
 	"user_brand_affinity",
 	"query_affordability_intent",
 	"affordability_price_score",
+	"brand_family_match",
+	"subbrand_title_match",
 }

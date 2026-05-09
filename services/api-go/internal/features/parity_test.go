@@ -60,6 +60,8 @@ type fixtureExpects struct {
 	CategoryQueryCoverage  float64  `json:"category_query_token_coverage"`
 	ProductCategoryOverlap float64  `json:"product_category_token_overlap"`
 	TitleExactQueryMatch   float64  `json:"title_exact_query_match"`
+	BrandFamilyMatch       *float64 `json:"brand_family_match"`
+	SubbrandTitleMatch     *float64 `json:"subbrand_title_match"`
 }
 
 // TestInteractionParityFixtures runs the Go reference transforms against the
@@ -143,6 +145,16 @@ func TestInteractionParityFixtures(t *testing.T) {
 			}
 			if v := ExactQueryPhraseMatch(c.Query, c.ProductTitle); v != c.Expected.TitleExactQueryMatch {
 				t.Errorf("ExactQueryPhraseMatch(%q, %q) = %v, want %v", c.Query, c.ProductTitle, v, c.Expected.TitleExactQueryMatch)
+			}
+			if c.Expected.BrandFamilyMatch != nil {
+				if v := BrandFamilyMatch(c.Query, c.ProductBrand, c.ProductTitle); v != *c.Expected.BrandFamilyMatch {
+					t.Errorf("BrandFamilyMatch(%q, %q, %q) = %v, want %v", c.Query, c.ProductBrand, c.ProductTitle, v, *c.Expected.BrandFamilyMatch)
+				}
+			}
+			if c.Expected.SubbrandTitleMatch != nil {
+				if v := SubbrandTitleMatch(c.Query, c.ProductTitle); v != *c.Expected.SubbrandTitleMatch {
+					t.Errorf("SubbrandTitleMatch(%q, %q) = %v, want %v", c.Query, c.ProductTitle, v, *c.Expected.SubbrandTitleMatch)
+				}
 			}
 		})
 	}

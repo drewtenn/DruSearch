@@ -9,6 +9,7 @@ BASE = "http://api:8080"
 
 CASES = [
     {"query": "mens nike running shoes", "must_path": "Men", "must_brand": "Nike"},
+    {"query": "mens jordan basketball", "must_path": "Basketball", "must_title_token": "jordan"},
     {"query": "womens running shoes", "must_path": "Women"},
     {"query": "boys shoes", "must_path": "Boys"},
     {"query": "girls sandals", "must_path": "Girls"},
@@ -35,6 +36,8 @@ def main() -> int:
             failures.append(f"{case['query']}: top path {path} missing {case['must_path']}")
         if case.get("must_brand") and top.get("brand") != case["must_brand"]:
             failures.append(f"{case['query']}: top brand {top.get('brand')} != {case['must_brand']}")
+        if case.get("must_title_token") and case["must_title_token"].lower() not in (top.get("title") or "").lower():
+            failures.append(f"{case['query']}: top title {top.get('title')} missing {case['must_title_token']}")
     if failures:
         print("\n".join(failures), file=sys.stderr)
         return 1

@@ -46,6 +46,43 @@ _CATEGORY_GENDER_VALUES = {
     "girls": GENDER_GIRLS,
 }
 
+_BRAND_STOP_TOKENS = {
+    "accessories",
+    "accessory",
+    "active",
+    "athletic",
+    "basketball",
+    "boy",
+    "boys",
+    "clothing",
+    "fashion",
+    "girl",
+    "girls",
+    "jewelry",
+    "men",
+    "mens",
+    "running",
+    "shoe",
+    "shoes",
+    "sneaker",
+    "sneakers",
+    "sports",
+    "team",
+    "watch",
+    "watches",
+    "woman",
+    "women",
+    "womens",
+}
+
+_SUBBRAND_TO_PARENT_BRANDS = {
+    "jordan": frozenset({"nike"}),
+}
+
+_SUBBRAND_TITLE_ALIASES = {
+    "jordan": (("air", "jordan"), ("jordan",)),
+}
+
 
 def tokenize(s: str | None) -> list[str]:
     if not s:
@@ -67,6 +104,10 @@ def query_has_color(query: str | None, known_colors_lower: frozenset[str]) -> fl
 
 def query_has_category_token(query: str | None, known_category_tokens: frozenset[str]) -> float:
     return 1.0 if (set(tokenize(query)) & known_category_tokens) else 0.0
+
+
+def brand_tokens(text: str | None) -> set[str]:
+    return {t for t in tokenize(text) if t not in _BRAND_STOP_TOKENS}
 
 
 def query_has_size_pattern(query: str | None) -> float:
@@ -134,17 +175,51 @@ def gender_intent_mismatch(query_gender: float, product_gender_value: float) -> 
 
 
 def product_brand_match(query: str | None, brand: str | None) -> float:
-    query_tokens = set(tokenize(query))
-    brand_tokens = set(tokenize(brand))
-    return 1.0 if query_tokens and brand_tokens and bool(query_tokens & brand_tokens) else 0.0
+    query_tokens = brand_tokens(query)
+    product_tokens = brand_tokens(brand)
+    return 1.0 if query_tokens and product_tokens and bool(query_tokens & product_tokens) else 0.0
 
 
 def product_brand_token_overlap(query: str | None, brand: str | None) -> float:
-    query_tokens = set(tokenize(query))
-    brand_tokens = set(tokenize(brand))
-    if not brand_tokens:
+    query_tokens = brand_tokens(query)
+    product_tokens = brand_tokens(brand)
+    if not product_tokens:
         return 0.0
-    return float(len(query_tokens & brand_tokens) / len(brand_tokens))
+    return float(len(query_tokens & product_tokens) / len(product_tokens))
+
+
+def _contains_token_sequence(tokens: list[str], sequence: tuple[str, ...]) -> bool:
+    if not sequence or len(sequence) > len(tokens):
+        return False
+    width = len(sequence)
+    return any(tuple(tokens[i : i + width]) == sequence for i in range(len(tokens) - width + 1))
+
+
+def subbrand_title_match(query: str | None, title: str | None) -> float:
+    query_tokens = set(brand_tokens(query))
+    if not query_tokens:
+        return 0.0
+    title_tokens = tokenize(title)
+    for subbrand, aliases in _SUBBRAND_TITLE_ALIASES.items():
+        if subbrand not in query_tokens:
+            continue
+        if any(_contains_token_sequence(title_tokens, alias) for alias in aliases):
+            return 1.0
+    return 0.0
+
+
+def brand_family_match(query: str | None, brand: str | None, title: str | None) -> float:
+    query_tokens = set(brand_tokens(query))
+    product_brand_tokens = set(brand_tokens(brand))
+    if not query_tokens or not product_brand_tokens:
+        return 0.0
+    if query_tokens & product_brand_tokens:
+        return 1.0
+    for subbrand in query_tokens:
+        parents = _SUBBRAND_TO_PARENT_BRANDS.get(subbrand)
+        if parents and product_brand_tokens & parents and subbrand_title_match(query, title):
+            return 1.0
+    return 0.0
 
 
 def product_color_match(query: str | None, color: str | None) -> float:

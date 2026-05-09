@@ -38,7 +38,7 @@ func LoadVocab(ctx context.Context, pool *pgxpool.Pool) (*Vocab, error) {
 		if err := rows.Scan(&brand, &color, &categoryPath); err != nil {
 			return nil, err
 		}
-		for _, t := range Tokenize(brand) {
+		for _, t := range BrandTokens(brand) {
 			v.Brand[t] = struct{}{}
 		}
 		for _, t := range Tokenize(color) {
@@ -113,6 +113,8 @@ func BuildMatrix(query string, hits []retrieval.Hit, vocab *Vocab, user *UserFea
 		}
 		out[off+IdxQueryAffordabilityIntent] = qAffordability
 		out[off+IdxAffordabilityPriceScore] = AffordabilityPriceScore(qAffordability, h.PriceCents)
+		out[off+IdxBrandFamilyMatch] = BrandFamilyMatch(query, h.Brand, h.Title)
+		out[off+IdxSubbrandTitleMatch] = SubbrandTitleMatch(query, h.Title)
 	}
 	return out
 }

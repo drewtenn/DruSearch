@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/drewtenn/drusearch/services/api-go/internal/features"
 )
 
 const tinyXGBoostModel = `{
@@ -62,9 +64,9 @@ func TestXGBoostScoreEvaluatesNativeJSONTrees(t *testing.T) {
 		t.Fatalf("LoadXGBoost: %v", err)
 	}
 
-	matrix := make([]float64, 2*27)
+	matrix := make([]float64, 2*features.NumFeatures)
 	matrix[0] = 0.5
-	matrix[27] = 2.5
+	matrix[features.NumFeatures] = 2.5
 	got, err := model.Score(matrix, 2)
 	if err != nil {
 		t.Fatalf("Score: %v", err)

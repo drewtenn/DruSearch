@@ -46,6 +46,8 @@ func TestSchemaMatchesGenerated(t *testing.T) {
 		IdxUserBrandAffinity:           "user_brand_affinity",
 		IdxQueryAffordabilityIntent:    "query_affordability_intent",
 		IdxAffordabilityPriceScore:     "affordability_price_score",
+		IdxBrandFamilyMatch:            "brand_family_match",
+		IdxSubbrandTitleMatch:          "subbrand_title_match",
 	}
 	for idx, name := range indexExpect {
 		if Names[idx] != name {

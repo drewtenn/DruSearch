@@ -36,8 +36,10 @@ const (
 	IdxUserBrandAffinity           = 24
 	IdxQueryAffordabilityIntent    = 25
 	IdxAffordabilityPriceScore     = 26
+	IdxBrandFamilyMatch            = 27
+	IdxSubbrandTitleMatch          = 28
 
-	NumFeatures = 27
+	NumFeatures = 29
 )
 
 // Names ordered by their feature index above.
@@ -69,4 +71,6 @@ var Names = [...]string{
 	"user_brand_affinity",
 	"query_affordability_intent",
 	"affordability_price_score",
+	"brand_family_match",
+	"subbrand_title_match",
 }
