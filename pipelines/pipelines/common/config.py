@@ -5,6 +5,11 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+from dotenv import find_dotenv, load_dotenv
+
+
+load_dotenv(find_dotenv(usecwd=True), override=False)
+
 
 @dataclass(frozen=True)
 class Settings:
