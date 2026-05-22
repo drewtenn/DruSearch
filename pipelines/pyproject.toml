@@ -21,7 +21,7 @@ dependencies = [
   "tenacity==9.0.0",
   "python-dotenv==1.0.1",
   "httpx==0.28.1",
-  "prefect==3.1.7",
+  "prefect==3.6.28.dev2",
 ]
 
 [build-system]
